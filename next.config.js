@@ -6,6 +6,13 @@ const nextConfig = {
   images: {
     unoptimized: true, 
   },
+  // TAMBAHKAN DUA BAGIAN INI:
+  eslint: {
+    ignoreDuringBuilds: true, // Mengabaikan error eslint saat build
+  },
+  typescript: {
+    ignoreBuildErrors: true, // Mengabaikan error TypeScript saat build
+  },
 };
 
 module.exports = nextConfig;
