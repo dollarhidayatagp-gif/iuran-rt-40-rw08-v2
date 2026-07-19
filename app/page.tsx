@@ -401,7 +401,6 @@ export default function IuranWargaRTApp() {
   const text = await res.text();
   try { return JSON.parse(text); } catch { throw new Error('Respons Apps Script bukan JSON yang valid. Pastikan URL benar dan deployment "Anyone can access".'); }
 };
-  };
 
   // Kirim (overwrite) satu tabel penuh ke Google Sheet. Dipakai setelah setiap
   // perubahan Anggota/Iuran supaya Sheet selalu jadi cerminan data terbaru.
