@@ -1,6 +1,3 @@
-// @ts-nocheck
-'use client';
-import React, { useState, useEffect } from 'react';
 'use client';
 import React, { useState, useEffect } from 'react';
 
@@ -399,11 +396,11 @@ export default function IuranWargaRTApp() {
   const [dataWargaAsliSudahMasuk, setDataWargaAsliSudahMasuk] = useState(false);
   const [sheetTesting, setSheetTesting] = useState(false);
 
-  const sheetFetch = async (url: any, options?: any) => {
-  const res = await fetch(url, options);
-  const text = await res.text();
-  try { return JSON.parse(text); } catch { throw new Error('Respons Apps Script bukan JSON yang valid. Pastikan URL benar dan deployment "Anyone can access".'); }
-};
+  const sheetFetch = async (url, options) => {
+    const res = await fetch(url, options);
+    const text = await res.text();
+    try { return JSON.parse(text); } catch { throw new Error('Respons Apps Script bukan JSON yang valid. Pastikan URL benar dan deployment "Anyone can access".'); }
+  };
 
   // Kirim (overwrite) satu tabel penuh ke Google Sheet. Dipakai setelah setiap
   // perubahan Anggota/Iuran supaya Sheet selalu jadi cerminan data terbaru.
