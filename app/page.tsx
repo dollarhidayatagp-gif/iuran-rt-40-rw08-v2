@@ -66,6 +66,26 @@ export default function IuranWargaRTApp() {
   // ==========================================
   const [role, setRole] = useState('user');
   const [view, setView] = useState('landing');
+
+  // ==========================================
+  // AKSES TERSEMBUNYI LOGIN PANITIA/ADMIN
+  // -----------------------------------------------------------
+  // Tombol "Login Panitia/Admin" TIDAK lagi ditampilkan di menu Web Utama
+  // (supaya tidak dicampur/terlihat pengunjung biasa). Panitia/Admin tetap
+  // bisa membuka form login-nya lewat tautan khusus yang ditambahkan
+  // sendiri di belakang alamat website, misalnya:
+  //   https://alamat-website-anda.com/?admin=1
+  // Begitu parameter ?admin=1 terdeteksi di URL, tombol "Login Panitia/Admin"
+  // otomatis muncul kembali di pojok kanan atas. Simpan/bookmark tautan ini
+  // khusus untuk panitia, jangan disebarkan ke warga umum.
+  // ==========================================
+  const [showAdminEntry, setShowAdminEntry] = useState(false);
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('admin') === '1') setShowAdminEntry(true);
+    } catch (e) { /* abaikan di lingkungan tanpa window.location */ }
+  }, []);
   const [activeMenu, setActiveMenu] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false); // sidebar dashboard di mode HP (default tertutup)
 
@@ -149,6 +169,13 @@ export default function IuranWargaRTApp() {
     panitiaSekretaris: 'Fitriani',
     panitiaBendahara: 'Ahmad',
     panitiaHumas: 'Dedi Kurniawan',
+    // LABEL/KETERANGAN JABATAN pada kartu "Struktur Pengurus RW" di Web Utama.
+    // Bisa diedit bebas oleh Admin lewat CMS Super Editor (tidak lagi hardcode
+    // "Ketua RT"), default sekarang "Ketua RW".
+    labelKetua: 'Ketua RW',
+    labelSekretaris: 'Sekretaris',
+    labelBendahara: 'Bendahara',
+    labelHumas: 'Humas',
     // ----- INFORMASI UMUM RT (diisi Admin lewat CMS Super Editor) -----
     fotoRTUmum: null,
     deskripsiRT: 'RT 40 RW 08 Perum Bumi Indah Proklamasi adalah lingkungan tempat tinggal warga yang aktif menyelenggarakan kegiatan kebersihan, keamanan (ronda), kerja bakti, serta program sosial kemasyarakatan lainnya melalui pengelolaan iuran bulanan warga yang transparan.',
@@ -1184,6 +1211,10 @@ export default function IuranWargaRTApp() {
       panitiaSekretaris: cmsForm.panitiaSekretaris,
       panitiaBendahara: cmsForm.panitiaBendahara,
       panitiaHumas: cmsForm.panitiaHumas,
+      labelKetua: cmsForm.labelKetua,
+      labelSekretaris: cmsForm.labelSekretaris,
+      labelBendahara: cmsForm.labelBendahara,
+      labelHumas: cmsForm.labelHumas,
       fotoRTUmum: cmsForm.fotoRTUmum,
       deskripsiRT: cmsForm.deskripsiRT,
       luasRT: cmsForm.luasRT,
@@ -2282,7 +2313,9 @@ export default function IuranWargaRTApp() {
                 <button onClick={() => { setView('landing'); }} className={`px-3 py-1 rounded-md text-[11px] ${view === 'landing' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400'}`}>Web Utama</button>
                 <button onClick={() => { setRole('user'); setView('dashboard'); setActiveMenu('dashboard'); }} className={`px-3 py-1 rounded-md text-[11px] ${role === 'user' && view === 'dashboard' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400'}`}>Dashboard Warga</button>
               </div>
-              <button onClick={() => setShowAdminLoginForm(true)} className="text-[10px] font-bold text-slate-500 hover:text-amber-400 underline underline-offset-2 ml-1">Login Panitia/Admin</button>
+              {showAdminEntry && (
+                <button onClick={() => setShowAdminLoginForm(true)} className="text-[10px] font-bold text-slate-500 hover:text-amber-400 underline underline-offset-2 ml-1">Login Panitia/Admin</button>
+              )}
             </>
           ) : (
             <>
@@ -2617,7 +2650,7 @@ export default function IuranWargaRTApp() {
                     </div>
                   </div>
 
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-[11px] text-emerald-800 font-bold text-center">Iuran bulanan: Rp{IURAN_BULANAN.toLocaleString('id-ID')} / rumah, sama rata untuk semua warga.</div>
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-[11px] text-emerald-800 font-bold text-center">Iuran ini mencakup kebersihan, keamanan, Kas RT</div>
                   <button type="submit" className="w-full bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold p-2.5 rounded-xl">Daftar Sebagai Warga</button>
                 </form>
               </div>
@@ -2678,19 +2711,19 @@ export default function IuranWargaRTApp() {
                 <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest text-center mb-4">Struktur Pengurus RW</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div className="bg-slate-50 border rounded-xl p-3 text-center">
-                    <p className="text-[9px] font-black text-emerald-700 uppercase tracking-wider">Ketua RT</p>
+                    <p className="text-[9px] font-black text-emerald-700 uppercase tracking-wider">{cmsTeks.labelKetua}</p>
                     <p className="font-black text-slate-900 mt-1">{cmsTeks.panitiaKetua}</p>
                   </div>
                   <div className="bg-slate-50 border rounded-xl p-3 text-center">
-                    <p className="text-[9px] font-black text-emerald-700 uppercase tracking-wider">Sekretaris</p>
+                    <p className="text-[9px] font-black text-emerald-700 uppercase tracking-wider">{cmsTeks.labelSekretaris}</p>
                     <p className="font-black text-slate-900 mt-1">{cmsTeks.panitiaSekretaris}</p>
                   </div>
                   <div className="bg-slate-50 border rounded-xl p-3 text-center">
-                    <p className="text-[9px] font-black text-emerald-700 uppercase tracking-wider">Bendahara</p>
+                    <p className="text-[9px] font-black text-emerald-700 uppercase tracking-wider">{cmsTeks.labelBendahara}</p>
                     <p className="font-black text-slate-900 mt-1">{cmsTeks.panitiaBendahara}</p>
                   </div>
                   <div className="bg-slate-50 border rounded-xl p-3 text-center">
-                    <p className="text-[9px] font-black text-emerald-700 uppercase tracking-wider">Humas</p>
+                    <p className="text-[9px] font-black text-emerald-700 uppercase tracking-wider">{cmsTeks.labelHumas}</p>
                     <p className="font-black text-slate-900 mt-1">{cmsTeks.panitiaHumas}</p>
                   </div>
                 </div>
@@ -4219,6 +4252,18 @@ export default function IuranWargaRTApp() {
                         <input type="text" value={cmsForm.panitiaBendahara} onChange={(e) => setCmsForm({...cmsForm, panitiaBendahara: e.target.value})} className="w-full border p-2 rounded-xl bg-emerald-50 border-emerald-200 font-bold text-emerald-900" />
                       </div>
                       <div><label className="block text-slate-600 mb-1">Humas</label><input type="text" value={cmsForm.panitiaHumas} onChange={(e) => setCmsForm({...cmsForm, panitiaHumas: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
+                    </div>
+
+                    {/* KETERANGAN/LABEL JABATAN - teks kecil di atas nama pada kartu
+                        "Struktur Pengurus RW" di Web Utama (mis. "Ketua RW", "Sekretaris",
+                        dst). Dipisah dari nama supaya keterangan jabatan bisa diedit
+                        bebas oleh Admin tanpa mengubah kode. */}
+                    <p className="text-[10px] text-slate-400 mt-4 mb-2">Keterangan/label jabatan yang tampil di atas setiap nama pada kartu "Struktur Pengurus RW" Web Utama:</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div><label className="block text-slate-600 mb-1">Label Ketua</label><input type="text" value={cmsForm.labelKetua} onChange={(e) => setCmsForm({...cmsForm, labelKetua: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
+                      <div><label className="block text-slate-600 mb-1">Label Sekretaris</label><input type="text" value={cmsForm.labelSekretaris} onChange={(e) => setCmsForm({...cmsForm, labelSekretaris: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
+                      <div><label className="block text-slate-600 mb-1">Label Bendahara</label><input type="text" value={cmsForm.labelBendahara} onChange={(e) => setCmsForm({...cmsForm, labelBendahara: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
+                      <div><label className="block text-slate-600 mb-1">Label Humas</label><input type="text" value={cmsForm.labelHumas} onChange={(e) => setCmsForm({...cmsForm, labelHumas: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                     </div>
 
                     {/* TANDA TANGAN DIGITAL BENDAHARA RT - dipakai di Kuitansi Digital
