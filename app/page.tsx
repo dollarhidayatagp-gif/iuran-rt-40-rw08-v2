@@ -1,5 +1,63 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+
+// =====================================================================
+// KOMPONEN: PILIHAN DROPDOWN (PENGGANTI <select> NATIVE)
+// -----------------------------------------------------------
+// PERBAIKAN: <select> bawaan HTML memakai tampilan "native" dari
+// sistem operasi/browser masing-masing HP (contoh: Android menampilkan
+// daftar radio besar warna gelap tanpa bisa diatur ukuran/font-nya,
+// seperti pada laporan tampilan pilihan Blok & Nomor Rumah yang
+// terlihat tidak rapi/proporsional saat daftar).
+// Komponen di bawah ini membuat dropdown SENDIRI (bukan <select> bawaan)
+// dengan gaya yang konsisten di semua perangkat (HP maupun laptop),
+// mengikuti desain form yang sudah ada (rounded-xl, font rapi, dsb).
+// =====================================================================
+function PilihanDropdown({ value, options, onChange, placeholder = 'Pilih' }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, []);
+
+  return (
+    <div className="relative" ref={wrapRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full border p-2 rounded-xl bg-slate-50 font-bold text-xs text-left flex items-center justify-between gap-2 text-slate-800"
+      >
+        <span className={value ? '' : 'text-slate-400 font-semibold'}>{value || placeholder}</span>
+        <svg className={`w-3.5 h-3.5 shrink-0 text-slate-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.25a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" clipRule="evenodd" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute z-40 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl py-1 anim-pop">
+          {options.map((opt) => (
+            <button
+              type="button"
+              key={opt}
+              onClick={() => { onChange(opt); setOpen(false); }}
+              className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors duration-100 ${value === opt ? 'bg-emerald-600 text-white font-bold' : 'text-slate-700 hover:bg-emerald-50'}`}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // =====================================================================
 // URL WEB APP APPS SCRIPT DEFAULT (BAWAAN, TERTANAM DI KODE)
@@ -974,8 +1032,36 @@ export default function IuranWargaRTApp() {
   // ==========================================
   // LOGIN ADMIN/PANITIA (TERPISAH DARI LOGIN WARGA)
   // Akses Admin Panel HANYA bisa didapat lewat login ini, bukan tombol bebas.
+  // -----------------------------------------------------------
+  // PERBAIKAN "PASSWORD SALAH SETELAH LOGIN ADMIN DI HIDE / TIDAK BISA
+  // MASUK DARI LAPTOP & HP": sebelumnya username & password Admin HANYA
+  // tersimpan di memori React (state), sama seperti kasus URL Apps Script
+  // yang sudah pernah diperbaiki di atas. Akibatnya begitu halaman
+  // di-refresh, ditutup, atau dibuka dari perangkat lain (laptop vs HP),
+  // perubahan password Admin yang pernah disimpan hilang dan aplikasi
+  // balik lagi ke bawaan admin/admin123 - atau sebaliknya, kalau device
+  // itu masih menyimpan sesi lama, password baru dianggap tidak "nyambung"
+  // ke device lain. Sekarang akun Admin disimpan juga ke localStorage
+  // BROWSER MASING-MASING (persis seperti URL Apps Script di atas),
+  // supaya begitu password diganti lewat menu "Ganti Password Admin",
+  // perubahan itu konsisten dipakai setiap kali Admin Panel dibuka lagi
+  // di browser yang sama. Kalau localStorage kosong/baru pertama kali
+  // (device belum pernah dipakai login Admin), otomatis balik ke bawaan
+  // admin/admin123 supaya Panitia tidak pernah terkunci total.
   // ==========================================
-  const [adminAccount, setAdminAccount] = useState({ username: 'admin', password: 'admin123' });
+  const bacaAdminAccountTersimpan = () => {
+    try {
+      if (typeof window === 'undefined') return null;
+      const raw = window.localStorage.getItem('iuran_rt_admin_account');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.username && parsed.password) return parsed;
+      return null;
+    } catch (e) {
+      return null;
+    }
+  };
+  const [adminAccount, setAdminAccount] = useState(() => bacaAdminAccountTersimpan() || { username: 'admin', password: 'admin123' });
   const [adminLoggedIn, setAdminLoggedIn] = useState(false);
   const [showAdminLoginForm, setShowAdminLoginForm] = useState(false);
   const [formAdminLogin, setFormAdminLogin] = useState({ username: '', password: '' });
@@ -1783,9 +1869,12 @@ export default function IuranWargaRTApp() {
   const handleAdminLogin = (e) => {
     e.preventDefault();
     setAdminLoginError('');
+    // .trim() juga dipakai di password (bukan cuma username) supaya spasi
+    // tak sengaja dari keyboard HP (autocorrect/autocapitalize) tidak bikin
+    // login gagal padahal username & password yang diketik sudah benar.
     if (
-      formAdminLogin.username.trim().toLowerCase() === adminAccount.username.toLowerCase() &&
-      formAdminLogin.password === adminAccount.password
+      formAdminLogin.username.trim().toLowerCase() === adminAccount.username.trim().toLowerCase() &&
+      formAdminLogin.password.trim() === adminAccount.password.trim()
     ) {
       setAdminLoggedIn(true);
       setIsSimulatedSession(false);
@@ -1823,10 +1912,37 @@ export default function IuranWargaRTApp() {
       setAdminAccountMsg({ tipe: 'error', teks: 'Konfirmasi password baru tidak cocok.' });
       return;
     }
-    setAdminAccount({ username: formAdminAccount.username.trim() || adminAccount.username, password: formAdminAccount.passwordBaru });
-    setFormAdminAccount({ username: formAdminAccount.username.trim() || adminAccount.username, password: '', passwordBaru: '', konfirmasiPassword: '' });
+    const akunBaru = { username: formAdminAccount.username.trim() || adminAccount.username, password: formAdminAccount.passwordBaru };
+    setAdminAccount(akunBaru);
+    // SIMPAN KE LOCALSTORAGE - supaya login Admin dengan username/password
+    // baru ini tetap berlaku setiap kali Admin Panel dibuka lagi di browser
+    // yang sama (tidak balik ke admin/admin123 begitu halaman di-refresh).
+    try {
+      window.localStorage.setItem('iuran_rt_admin_account', JSON.stringify(akunBaru));
+    } catch (err) { /* localStorage tidak tersedia, abaikan */ }
+    setFormAdminAccount({ username: akunBaru.username, password: '', passwordBaru: '', konfirmasiPassword: '' });
     setAdminAccountMsg({ tipe: 'success', teks: 'Username & password login Admin Panel berhasil diperbarui.' });
     showToast('Akun login Admin Panel berhasil diperbarui.');
+  };
+
+  // ==========================================
+  // RESET AKUN ADMIN KE BAWAAN (admin/admin123) - JALAN DARURAT
+  // -----------------------------------------------------------
+  // Kalau Panitia lupa password yang pernah diganti / password baru
+  // ternyata tidak tersimpan di device tertentu, tombol ini menghapus
+  // akun Admin yang tersimpan di localStorage browser tersebut dan
+  // mengembalikannya ke bawaan admin/admin123, supaya tidak pernah
+  // benar-benar terkunci dari Admin Panel.
+  // ==========================================
+  const handleResetAdminAccountKeDefault = () => {
+    const akunDefault = { username: 'admin', password: 'admin123' };
+    setAdminAccount(akunDefault);
+    try {
+      window.localStorage.removeItem('iuran_rt_admin_account');
+    } catch (err) { /* abaikan */ }
+    setFormAdminAccount({ username: akunDefault.username, password: '', passwordBaru: '', konfirmasiPassword: '' });
+    setAdminAccountMsg({ tipe: 'success', teks: 'Akun login Admin Panel di browser ini dikembalikan ke bawaan (admin/admin123).' });
+    showToast('Akun Admin dikembalikan ke bawaan admin/admin123.');
   };
 
   // ==========================================
@@ -2338,8 +2454,8 @@ export default function IuranWargaRTApp() {
             <h3 className="text-sm font-black text-slate-900 text-center mb-1">Login Panitia / Admin</h3>
             <p className="text-[10px] text-slate-400 text-center mb-4">Khusus panitia. Akses Admin Panel tidak muncul sebelum login berhasil di sini.</p>
             <form onSubmit={handleAdminLogin} className="space-y-3 text-xs font-semibold">
-              <div><label className="block mb-1 text-slate-600">Username Admin</label><input type="text" required value={formAdminLogin.username} onChange={(e) => setFormAdminLogin({...formAdminLogin, username: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
-              <div><label className="block mb-1 text-slate-600">Password Admin</label><input type="password" required value={formAdminLogin.password} onChange={(e) => setFormAdminLogin({...formAdminLogin, password: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
+              <div><label className="block mb-1 text-slate-600">Username Admin</label><input type="text" required autoCapitalize="none" autoCorrect="off" autoComplete="username" spellCheck="false" value={formAdminLogin.username} onChange={(e) => setFormAdminLogin({...formAdminLogin, username: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
+              <div><label className="block mb-1 text-slate-600">Password Admin</label><input type="password" required autoCapitalize="none" autoCorrect="off" autoComplete="current-password" spellCheck="false" value={formAdminLogin.password} onChange={(e) => setFormAdminLogin({...formAdminLogin, password: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
               {adminLoginError && <p className="text-[11px] font-bold text-rose-600">{adminLoginError}</p>}
               <button type="submit" className="w-full bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold p-2.5 rounded-xl transition-transform duration-150 hover:scale-[1.01]">🔑 Masuk Admin Panel</button>
             </form>
@@ -2601,15 +2717,11 @@ export default function IuranWargaRTApp() {
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="block mb-1 text-slate-600">Blok Rumah</label>
-                      <select required value={formDaftar.blokRumah} onChange={(e) => setFormDaftar({...formDaftar, blokRumah: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50 font-bold">
-                        {DAFTAR_BLOK_RUMAH.map(b => <option key={b} value={b}>{b}</option>)}
-                      </select>
+                      <PilihanDropdown value={formDaftar.blokRumah} options={DAFTAR_BLOK_RUMAH} onChange={(v) => setFormDaftar({...formDaftar, blokRumah: v})} placeholder="Pilih Blok" />
                     </div>
                     <div>
                       <label className="block mb-1 text-slate-600">Nomor Rumah</label>
-                      <select required value={formDaftar.nomorRumahUnit} onChange={(e) => setFormDaftar({...formDaftar, nomorRumahUnit: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50 font-bold">
-                        {DAFTAR_NOMOR_RUMAH.map(n => <option key={n} value={n}>{n}</option>)}
-                      </select>
+                      <PilihanDropdown value={formDaftar.nomorRumahUnit} options={DAFTAR_NOMOR_RUMAH} onChange={(v) => setFormDaftar({...formDaftar, nomorRumahUnit: v})} placeholder="Pilih Nomor" />
                     </div>
                   </div>
                   <div><label className="block mb-1 text-slate-600">Email</label><input type="email" required placeholder="hidayat@mail.com" value={formDaftar.email} onChange={(e) => setFormDaftar({...formDaftar, email: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
@@ -4464,10 +4576,12 @@ export default function IuranWargaRTApp() {
                     <div><label className="block text-slate-600 mb-1">Password Baru</label><input type="password" required value={formAdminAccount.passwordBaru} onChange={(e) => setFormAdminAccount({...formAdminAccount, passwordBaru: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                     <div className="sm:col-span-2"><label className="block text-slate-600 mb-1">Konfirmasi Password Baru</label><input type="password" required value={formAdminAccount.konfirmasiPassword} onChange={(e) => setFormAdminAccount({...formAdminAccount, konfirmasiPassword: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                     {adminAccountMsg.teks && <p className={`sm:col-span-2 text-[11px] font-bold ${adminAccountMsg.tipe === 'error' ? 'text-rose-600' : 'text-emerald-700'}`}>{adminAccountMsg.teks}</p>}
-                    <div className="sm:col-span-2 flex justify-end">
+                    <div className="sm:col-span-2 flex justify-between items-center flex-wrap gap-2">
+                      <button type="button" onClick={() => { if (window.confirm('Kembalikan username & password Admin Panel di browser ini ke bawaan admin/admin123?')) handleResetAdminAccountKeDefault(); }} className="text-rose-600 font-bold text-[11px] underline underline-offset-2">Reset ke Bawaan (admin/admin123)</button>
                       <button type="submit" className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold px-6 py-2.5 rounded-xl transition-transform duration-150 hover:scale-[1.02]">💾 Simpan Login Admin</button>
                     </div>
                   </form>
+                  <p className="text-[10px] text-slate-400 mt-3 leading-relaxed">Catatan: username &amp; password Admin Panel tersimpan di browser perangkat ini (localStorage). Kalau login dari laptop &amp; HP berbeda, dan salah satu perangkat pernah dipakai mengganti password sebelum perbaikan ini, gunakan tombol "Reset ke Bawaan" di perangkat yang gagal login, lalu login ulang dengan admin/admin123 dan ganti password lagi supaya tersimpan konsisten.</p>
                 </div>
               </div>
             )}
