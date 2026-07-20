@@ -481,8 +481,17 @@ export default function IuranWargaRTApp() {
   const [dataWargaAsliSudahMasuk, setDataWargaAsliSudahMasuk] = useState(false);
   const [sheetTesting, setSheetTesting] = useState(false);
 
+  // PERBAIKAN CACHE: request GET ke Apps Script (?action=getXxx) rawan di-cache
+  // oleh browser/HP (apalagi di HP, browser sering menyimpan hasil fetch GET
+  // yang persis sama supaya hemat data) -> akibatnya data yang tampil kadang
+  // masih versi LAMA walau Sheet-nya sudah di-update. Untuk request GET,
+  // ditambahkan parameter waktu unik (_ts) di setiap panggilan + cache:'no-store',
+  // supaya browser SELALU mengambil jawaban baru dari server, bukan dari cache.
   const sheetFetch = async (url, options) => {
-    const res = await fetch(url, options);
+    const metodeGet = !options || !options.method || options.method === 'GET';
+    const urlFinal = metodeGet ? `${url}${url.includes('?') ? '&' : '?'}_ts=${Date.now()}` : url;
+    const optionsFinal = { ...(options || {}), cache: 'no-store' };
+    const res = await fetch(urlFinal, optionsFinal);
     const text = await res.text();
     try { return JSON.parse(text); } catch { throw new Error('Respons Apps Script bukan JSON yang valid. Pastikan URL benar dan deployment "Anyone can access".'); }
   };
@@ -689,82 +698,115 @@ export default function IuranWargaRTApp() {
     }
   };
 
+  // ==========================================
+  // PERBAIKAN: proses ambil-semua-data dijadikan FUNGSI (bukan cuma isi
+  // useEffect sekali jalan), supaya bisa dipanggil ULANG kapan pun -
+  // terutama saat user berpindah kembali ke tab/app ini (lihat useEffect
+  // visibilitychange di bawah). Sebelumnya data cuma diambil SEKALI saat
+  // aplikasi pertama dibuka, jadi kalau ada perubahan di Sheet (oleh admin
+  // lain / dari HP lain) sementara tab ini tetap terbuka, perubahan itu
+  // TIDAK PERNAH terlihat sampai halaman di-reload penuh secara manual.
+  // Parameter `sunyi=true` dipakai untuk refresh di latar belakang supaya
+  // tidak memunculkan toast "berhasil dimuat" berulang-ulang tiap kali
+  // user pindah-pindah tab.
+  // ==========================================
+  const muatSemuaDataDariSheet = async (sunyi = false) => {
+    if (!cmsTeks.appsScriptUrl) return;
+    setSheetStatus('loading');
+    try {
+      const [
+        dataAnggota, dataIuran, dataKegiatan, dataKelompok,
+        dataPengajuan, dataStruktur, dataPengaturan, dataPeriode, dataRiwayatPeriode,
+        dataRiwayatKasRt, dataRealisasi, dataAgendaUtama, dataNotifikasi, dataWargaKeluar
+      ] = await Promise.all([
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getMembers`),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getIuran`),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getKegiatan`),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getKelompok`),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getPengajuan`),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getStrukturRT`),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getPengaturan`),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getPeriode`),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRiwayatPeriode`),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRiwayatKasRt`).catch(() => []),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRealisasiBelanja`),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getAgendaUtama`),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getNotifikasi`).catch(() => []),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getWargaKeluar`).catch(() => [])
+      ]);
+      if (Array.isArray(dataAnggota) && dataAnggota.length) {
+        setMembers(dataAnggota.map(m => ({ ...m, target: Number(m.target) || 0, anggotaKeluarga: parseAnggotaKeluarga(m.anggotaKeluarga) })));
+        setDataWargaAsliSudahMasuk(true);
+      }
+      if (Array.isArray(dataIuran)) {
+        setIuranMatrix(dataIuran.map(i => ({ ...i, bulanId: Number(i.bulanId) || 0, nominal: Number(i.nominal) || 0 })));
+      }
+      if (Array.isArray(dataKegiatan) && dataKegiatan.length) setKegiatanList(dataKegiatan.map(k => ({ ...k, foto: toDirectImageUrl(k.foto) })));
+      if (Array.isArray(dataKelompok) && dataKelompok.length) setKelompokList(dataKelompok.map(k => ({ ...k, kapasitas: Number(k.kapasitas) || 0 })));
+      if (Array.isArray(dataPengajuan)) setPengajuanBaru(dataPengajuan.map(p => ({ ...p, target: Number(p.target) || 0, anggotaKeluarga: parseAnggotaKeluarga(p.anggotaKeluarga) })));
+      if (Array.isArray(dataStruktur) && dataStruktur.length) setStrukturRt(dataStruktur.map(d => ({ ...d, foto: toDirectImageUrl(d.foto) })));
+      if (Array.isArray(dataPeriode) && dataPeriode.length) setPeriodeAktif(dataPeriode[0]);
+      if (Array.isArray(dataRiwayatPeriode)) setRiwayatPeriode(dataRiwayatPeriode);
+      if (Array.isArray(dataRiwayatKasRt) && dataRiwayatKasRt.length) setRiwayatKasRt(dataRiwayatKasRt.map(t => ({ ...t, nominal: Number(t.nominal) || 0 })));
+      if (Array.isArray(dataRealisasi)) setRealisasiBelanja(dataRealisasi.map(r => ({ ...r, nominal: Number(r.nominal) || 0 })));
+      if (Array.isArray(dataAgendaUtama) && dataAgendaUtama.length) {
+        const agendaNormal = { ...dataAgendaUtama[0], foto: toDirectImageUrl(dataAgendaUtama[0].foto) };
+        setAgendaUtama(agendaNormal);
+        setFormAgendaUtama(agendaNormal);
+      }
+      if (Array.isArray(dataNotifikasi)) setNotifikasiList(dataNotifikasi);
+      if (Array.isArray(dataWargaKeluar) && dataWargaKeluar.length) setWargaKeluarList(dataWargaKeluar);
+      if (Array.isArray(dataPengaturan) && dataPengaturan.length) {
+        const settingsRow = dataPengaturan[0];
+        setCmsTeks(prev => ({
+          ...prev,
+          ...settingsRow,
+          appsScriptUrl: prev.appsScriptUrl, // jangan ditimpa, URL koneksi tetap dari sumber lokal
+          logoRT: toDirectImageUrl(settingsRow.logoRT),
+          fotoLatarRT: toDirectImageUrl(settingsRow.fotoLatarRT),
+          fotoRTUmum: toDirectImageUrl(settingsRow.fotoRTUmum),
+          tandaTanganBendahara: toDirectImageUrl(settingsRow.tandaTanganBendahara),
+          syaratList: settingsRow.syaratList ? String(settingsRow.syaratList).split('|').filter(Boolean) : prev.syaratList,
+          ketentuanList: settingsRow.ketentuanList ? String(settingsRow.ketentuanList).split('|').filter(Boolean) : prev.ketentuanList,
+          asetRTList: settingsRow.asetRTList ? String(settingsRow.asetRTList).split('|').filter(Boolean) : prev.asetRTList,
+          infoPengumumanList: settingsRow.infoPengumumanList ? String(settingsRow.infoPengumumanList).split('|').filter(Boolean) : prev.infoPengumumanList,
+        }));
+      }
+      setSheetStatus('synced');
+      if (!sunyi) showToast('Seluruh data website berhasil dimuat dari Google Sheets.');
+    } catch (err) {
+      console.error(err);
+      setSheetStatus('error');
+      if (!sunyi) showToast(`Gagal memuat dari Google Sheets: ${err.message}`, 'error');
+    }
+  };
+
   // Ambil data dari Google Sheet saat aplikasi dibuka / saat URL Apps Script diisi & disimpan.
   useEffect(() => {
     if (!cmsTeks.appsScriptUrl) return;
-    let batal = false;
-    (async () => {
-      setSheetStatus('loading');
-      try {
-        const [
-          dataAnggota, dataIuran, dataKegiatan, dataKelompok,
-          dataPengajuan, dataStruktur, dataPengaturan, dataPeriode, dataRiwayatPeriode,
-          dataRiwayatKasRt, dataRealisasi, dataAgendaUtama, dataNotifikasi, dataWargaKeluar
-        ] = await Promise.all([
-          sheetFetch(`${cmsTeks.appsScriptUrl}?action=getMembers`),
-          sheetFetch(`${cmsTeks.appsScriptUrl}?action=getIuran`),
-          sheetFetch(`${cmsTeks.appsScriptUrl}?action=getKegiatan`),
-          sheetFetch(`${cmsTeks.appsScriptUrl}?action=getKelompok`),
-          sheetFetch(`${cmsTeks.appsScriptUrl}?action=getPengajuan`),
-          sheetFetch(`${cmsTeks.appsScriptUrl}?action=getStrukturRT`),
-          sheetFetch(`${cmsTeks.appsScriptUrl}?action=getPengaturan`),
-          sheetFetch(`${cmsTeks.appsScriptUrl}?action=getPeriode`),
-          sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRiwayatPeriode`),
-          sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRiwayatKasRt`).catch(() => []),
-          sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRealisasiBelanja`),
-          sheetFetch(`${cmsTeks.appsScriptUrl}?action=getAgendaUtama`),
-          sheetFetch(`${cmsTeks.appsScriptUrl}?action=getNotifikasi`).catch(() => []),
-          sheetFetch(`${cmsTeks.appsScriptUrl}?action=getWargaKeluar`).catch(() => [])
-        ]);
-        if (batal) return;
-        if (Array.isArray(dataAnggota) && dataAnggota.length) {
-          setMembers(dataAnggota.map(m => ({ ...m, target: Number(m.target) || 0, anggotaKeluarga: parseAnggotaKeluarga(m.anggotaKeluarga) })));
-          setDataWargaAsliSudahMasuk(true);
-        }
-        if (Array.isArray(dataIuran)) {
-          setIuranMatrix(dataIuran.map(i => ({ ...i, bulanId: Number(i.bulanId) || 0, nominal: Number(i.nominal) || 0 })));
-        }
-        if (Array.isArray(dataKegiatan) && dataKegiatan.length) setKegiatanList(dataKegiatan.map(k => ({ ...k, foto: toDirectImageUrl(k.foto) })));
-        if (Array.isArray(dataKelompok) && dataKelompok.length) setKelompokList(dataKelompok.map(k => ({ ...k, kapasitas: Number(k.kapasitas) || 0 })));
-        if (Array.isArray(dataPengajuan)) setPengajuanBaru(dataPengajuan.map(p => ({ ...p, target: Number(p.target) || 0, anggotaKeluarga: parseAnggotaKeluarga(p.anggotaKeluarga) })));
-        if (Array.isArray(dataStruktur) && dataStruktur.length) setStrukturRt(dataStruktur.map(d => ({ ...d, foto: toDirectImageUrl(d.foto) })));
-        if (Array.isArray(dataPeriode) && dataPeriode.length) setPeriodeAktif(dataPeriode[0]);
-        if (Array.isArray(dataRiwayatPeriode)) setRiwayatPeriode(dataRiwayatPeriode);
-        if (Array.isArray(dataRiwayatKasRt) && dataRiwayatKasRt.length) setRiwayatKasRt(dataRiwayatKasRt.map(t => ({ ...t, nominal: Number(t.nominal) || 0 })));
-        if (Array.isArray(dataRealisasi)) setRealisasiBelanja(dataRealisasi.map(r => ({ ...r, nominal: Number(r.nominal) || 0 })));
-        if (Array.isArray(dataAgendaUtama) && dataAgendaUtama.length) {
-          const agendaNormal = { ...dataAgendaUtama[0], foto: toDirectImageUrl(dataAgendaUtama[0].foto) };
-          setAgendaUtama(agendaNormal);
-          setFormAgendaUtama(agendaNormal);
-        }
-        if (Array.isArray(dataNotifikasi)) setNotifikasiList(dataNotifikasi);
-        if (Array.isArray(dataWargaKeluar) && dataWargaKeluar.length) setWargaKeluarList(dataWargaKeluar);
-        if (Array.isArray(dataPengaturan) && dataPengaturan.length) {
-          const settingsRow = dataPengaturan[0];
-          setCmsTeks(prev => ({
-            ...prev,
-            ...settingsRow,
-            appsScriptUrl: prev.appsScriptUrl, // jangan ditimpa, URL koneksi tetap dari sumber lokal
-            logoRT: toDirectImageUrl(settingsRow.logoRT),
-            fotoLatarRT: toDirectImageUrl(settingsRow.fotoLatarRT),
-            fotoRTUmum: toDirectImageUrl(settingsRow.fotoRTUmum),
-            tandaTanganBendahara: toDirectImageUrl(settingsRow.tandaTanganBendahara),
-            syaratList: settingsRow.syaratList ? String(settingsRow.syaratList).split('|').filter(Boolean) : prev.syaratList,
-            ketentuanList: settingsRow.ketentuanList ? String(settingsRow.ketentuanList).split('|').filter(Boolean) : prev.ketentuanList,
-            asetRTList: settingsRow.asetRTList ? String(settingsRow.asetRTList).split('|').filter(Boolean) : prev.asetRTList,
-            infoPengumumanList: settingsRow.infoPengumumanList ? String(settingsRow.infoPengumumanList).split('|').filter(Boolean) : prev.infoPengumumanList,
-          }));
-        }
-        setSheetStatus('synced');
-        showToast('Seluruh data website berhasil dimuat dari Google Sheets.');
-      } catch (err) {
-        if (batal) return;
-        console.error(err);
-        setSheetStatus('error');
-        showToast(`Gagal memuat dari Google Sheets: ${err.message}`, 'error');
+    muatSemuaDataDariSheet(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cmsTeks.appsScriptUrl]);
+
+  // PERBAIKAN: kalau user meninggalkan tab/app ini (pindah aplikasi lain,
+  // kunci layar HP, dsb) lalu KEMBALI lagi ke tab ini, aplikasi otomatis
+  // mengambil ulang seluruh data dari Google Sheet secara diam-diam
+  // (tanpa toast berisik). Ini memastikan setiap kali user "membuka lagi"
+  // aplikasinya, data yang tampil sudah pasti versi terbaru dari Sheet -
+  // bukan data lama yang nyangkut dari sesi sebelumnya.
+  useEffect(() => {
+    if (!cmsTeks.appsScriptUrl) return;
+    const handleKembaliAktif = () => {
+      if (document.visibilityState === 'visible') {
+        muatSemuaDataDariSheet(true);
       }
-    })();
-    return () => { batal = true; };
+    };
+    document.addEventListener('visibilitychange', handleKembaliAktif);
+    window.addEventListener('focus', handleKembaliAktif);
+    return () => {
+      document.removeEventListener('visibilitychange', handleKembaliAktif);
+      window.removeEventListener('focus', handleKembaliAktif);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmsTeks.appsScriptUrl]);
 
@@ -4275,13 +4317,23 @@ export default function IuranWargaRTApp() {
                       <h3 className="text-sm font-black text-slate-900">🔗 Koneksi Database Google Sheets</h3>
                       <p className="text-[11px] text-slate-400 mt-0.5">Data Anggota & Iuran akan tersimpan di Google Sheet panitia, bisa diakses semua user dari HP maupun PC/laptop.</p>
                     </div>
-                    <span className={`text-[10px] font-black px-3 py-1.5 rounded-full uppercase whitespace-nowrap ${
-                      sheetStatus === 'synced' ? 'bg-emerald-100 text-emerald-700' :
-                      sheetStatus === 'loading' ? 'bg-amber-100 text-amber-700' :
-                      sheetStatus === 'error' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'
-                    }`}>
-                      {sheetStatus === 'synced' ? '● Tersambung' : sheetStatus === 'loading' ? '● Menyinkron...' : sheetStatus === 'error' ? '● Gagal Tersambung' : '● Mode Lokal (belum disambungkan)'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] font-black px-3 py-1.5 rounded-full uppercase whitespace-nowrap ${
+                        sheetStatus === 'synced' ? 'bg-emerald-100 text-emerald-700' :
+                        sheetStatus === 'loading' ? 'bg-amber-100 text-amber-700' :
+                        sheetStatus === 'error' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'
+                      }`}>
+                        {sheetStatus === 'synced' ? '● Tersambung' : sheetStatus === 'loading' ? '● Menyinkron...' : sheetStatus === 'error' ? '● Gagal Tersambung' : '● Mode Lokal (belum disambungkan)'}
+                      </span>
+                      {/* PERBAIKAN: tombol paksa ambil ulang data terbaru dari Sheet, tanpa perlu reload halaman penuh */}
+                      <button
+                        type="button"
+                        onClick={() => muatSemuaDataDariSheet(false)}
+                        disabled={sheetStatus === 'loading'}
+                        title="Ambil ulang data terbaru dari Google Sheets"
+                        className="bg-slate-100 text-slate-700 font-black w-8 h-8 rounded-full flex items-center justify-center disabled:opacity-50"
+                      >⟳</button>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-slate-600 mb-1">URL Web App Google Apps Script</label>
