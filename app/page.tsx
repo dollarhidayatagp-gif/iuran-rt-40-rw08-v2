@@ -128,21 +128,33 @@ export default function IuranWargaRTApp() {
   // ==========================================
   // AKSES TERSEMBUNYI LOGIN PANITIA/ADMIN
   // -----------------------------------------------------------
-  // Tombol "Login Panitia/Admin" TIDAK lagi ditampilkan di menu Web Utama
-  // (supaya tidak dicampur/terlihat pengunjung biasa). Panitia/Admin tetap
-  // bisa membuka form login-nya lewat tautan khusus yang ditambahkan
-  // sendiri di belakang alamat website, misalnya:
+  // Tombol "Login Panitia/Admin" TIDAK ditampilkan ke pengunjung umum di
+  // menu Web Utama. Panitia membukanya SEKALI SAJA lewat tautan khusus:
   //   https://alamat-website-anda.com/?admin=1
-  // Begitu parameter ?admin=1 terdeteksi di URL, tombol "Login Panitia/Admin"
-  // otomatis muncul kembali di pojok kanan atas. Simpan/bookmark tautan ini
-  // khusus untuk panitia, jangan disebarkan ke warga umum.
+  // Begitu parameter ?admin=1 terdeteksi, tombol "Login Panitia/Admin"
+  // muncul di pojok kanan atas DAN status "sudah pernah buka lewat tautan
+  // khusus ini" disimpan ke localStorage HP/browser tersebut. Artinya untuk
+  // kunjungan-kunjungan BERIKUTNYA dari perangkat yang sama, tombolnya akan
+  // otomatis tetap muncul walau membuka alamat biasa TANPA ?admin=1 lagi -
+  // jadi panitia cukup pakai tautan ?admin=1 itu SATU KALI saja per HP/laptop
+  // (atau simpan sebagai bookmark/shortcut layar utama), tidak perlu diketik
+  // ulang setiap kali mau login. Kalau ganti HP/browser baru, ulangi sekali
+  // lagi buka pakai ?admin=1.
   // ==========================================
-  const [showAdminEntry, setShowAdminEntry] = useState(false);
+  const KUNCI_ADMIN_ENTRY_TERSIMPAN = 'iuran_rt_admin_entry_terlihat';
+  const [showAdminEntry, setShowAdminEntry] = useState(() => {
+    try {
+      return typeof window !== 'undefined' && window.localStorage.getItem(KUNCI_ADMIN_ENTRY_TERSIMPAN) === '1';
+    } catch (e) { return false; }
+  });
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
-      if (params.get('admin') === '1') setShowAdminEntry(true);
-    } catch (e) { /* abaikan di lingkungan tanpa window.location */ }
+      if (params.get('admin') === '1') {
+        setShowAdminEntry(true);
+        window.localStorage.setItem(KUNCI_ADMIN_ENTRY_TERSIMPAN, '1');
+      }
+    } catch (e) { /* abaikan di lingkungan tanpa window.location/localStorage */ }
   }, []);
   const [activeMenu, setActiveMenu] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false); // sidebar dashboard di mode HP (default tertutup)
