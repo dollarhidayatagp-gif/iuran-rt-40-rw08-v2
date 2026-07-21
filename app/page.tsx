@@ -264,6 +264,26 @@ export default function IuranWargaRTApp() {
   const [editingStrukturId, setEditingStrukturId] = useState(null);
 
   // ==========================================
+  // PERBAIKAN: nama Bendahara yang tampil & di-link ke Kuitansi Digital
+  // -----------------------------------------------------------
+  // SEBELUMNYA nama Bendahara di kuitansi diambil dari field teks terpisah
+  // (cmsTeks.panitiaBendahara) yang sebenarnya bagian dari kartu "Struktur
+  // Pengurus RW" di Beranda -> gampang salah/ketuker karena ada 2 tempat
+  // input nama Bendahara (satu di Panitia RW, satu lagi di kartu foto
+  // "Struktur Pengurus RT"), padahal yang benar-benar relevan untuk
+  // kuitansi warga adalah Bendahara RT.
+  // SEKARANG: nama Bendahara di kuitansi diambil OTOMATIS dari anggota
+  // "Struktur Pengurus RT" (strukturRt, kartu yang ada fotonya) yang
+  // jabatannya mengandung kata "Bendahara" (mis. Ahmad). Field
+  // cmsTeks.panitiaBendahara tetap disimpan sebagai CADANGAN saja (fallback)
+  // kalau belum ada anggota struktur RT berjabatan Bendahara.
+  // ==========================================
+  const getBendaharaRtNama = () => {
+    const anggotaBendahara = strukturRt.find(d => (d.jabatan || '').toLowerCase().includes('bendahara'));
+    return (anggotaBendahara && anggotaBendahara.nama) ? anggotaBendahara.nama : cmsTeks.panitiaBendahara;
+  };
+
+  // ==========================================
   // RIWAYAT KAS MASUK/KELUAR RT (BUKU KAS SEDERHANA)
   // -----------------------------------------------------------
   // Daftar transaksi kas keluar-masuk (pemasukan iuran/infaq, pengeluaran
@@ -488,10 +508,32 @@ export default function IuranWargaRTApp() {
     try { return JSON.parse(text); } catch { throw new Error('Respons Apps Script bukan JSON yang valid. Pastikan URL benar dan deployment "Anyone can access".'); }
   };
 
+  // ==========================================
+  // PERBAIKAN BUG: "data (foto) struktur RT tidak tersimpan padahal sudah
+  // diupdate" - PENYEBAB: aplikasi ini auto-refresh data dari Google Sheet
+  // secara diam-diam setiap kali tab/app ini kembali aktif (lihat useEffect
+  // visibilitychange di bawah). Kalau proses SIMPAN (syncSheet, mis. saat
+  // admin klik "Simpan Perubahan" foto struktur RT) BELUM SELESAI ketika
+  // auto-refresh itu jalan, hasil GET yang masih data LAMA (proses simpan
+  // ke Sheet belum "nyantol") bisa balik menimpa state lokal yang baru
+  // saja diperbarui -> foto/nama yang baru diedit terlihat hilang/balik ke
+  // versi lama, padahal sebenarnya cuma masalah waktu (race condition),
+  // bukan gagal tersimpan. Ini terutama sering kejadian di HP: membuka
+  // dialog "Choose File"/kamera, lalu kembali ke aplikasi, otomatis memicu
+  // event focus/visibilitychange tepat saat proses simpan sedang berjalan.
+  //
+  // SOLUSI: hitung berapa banyak proses syncSheet yang sedang berjalan
+  // (pendingSyncCountRef). Selama masih ada proses simpan yang berjalan,
+  // auto-refresh diam-diam (sunyi=true) DITUNDA/DILEWATI dulu, supaya tidak
+  // menimpa balik data yang baru saja disimpan.
+  // ==========================================
+  const pendingSyncCountRef = useRef(0);
+
   // Kirim (overwrite) satu tabel penuh ke Google Sheet. Dipakai setelah setiap
   // perubahan Anggota/Iuran supaya Sheet selalu jadi cerminan data terbaru.
   const syncSheet = async (sheetName, data) => {
     if (!cmsTeks.appsScriptUrl) return;
+    pendingSyncCountRef.current += 1;
     try {
       setSheetStatus('loading');
       await sheetFetch(cmsTeks.appsScriptUrl, {
@@ -504,6 +546,8 @@ export default function IuranWargaRTApp() {
       console.error(err);
       setSheetStatus('error');
       showToast(`Gagal sinkron ke Google Sheets: ${err.message}`, 'error');
+    } finally {
+      pendingSyncCountRef.current = Math.max(0, pendingSyncCountRef.current - 1);
     }
   };
 
@@ -714,6 +758,13 @@ export default function IuranWargaRTApp() {
   // ==========================================
   const muatSemuaDataDariSheet = async (sunyi = false) => {
     if (!cmsTeks.appsScriptUrl) return;
+    // PERBAIKAN BUG (lihat catatan di pendingSyncCountRef/syncSheet di atas):
+    // kalau ini refresh DIAM-DIAM (dipicu balik ke tab/app, bukan klik manual
+    // tombol "Refresh Data") DAN masih ada proses simpan (syncSheet) yang
+    // sedang berjalan, LEWATI dulu refresh ini. Kalau tidak, data LAMA hasil
+    // GET bisa menimpa balik perubahan (mis. foto struktur RT) yang baru saja
+    // disimpan admin tapi belum sempat "nyantol" di Google Sheet.
+    if (sunyi && pendingSyncCountRef.current > 0) return;
     setSheetStatus('loading');
     try {
       const [
@@ -1581,7 +1632,7 @@ export default function IuranWargaRTApp() {
       kelompok: formRealisasiBaru.kelompok,
       buktiUrl: formRealisasiBaru.buktiUrl,
       buktiNamaFile: formRealisasiBaru.buktiNamaFile,
-      dicatatOleh: `${cmsTeks.panitiaBendahara} (Bendahara)`
+      dicatatOleh: `${getBendaharaRtNama()} (Bendahara)`
     }]);
     showToast('Realisasi belanja kas RT berhasil dicatat & langsung tampil di Dashboard Warga.');
     setFormRealisasiBaru({ tanggal: '', kategori: 'Kebersihan', keterangan: '', nominal: '', kelompok: 'Semua', buktiUrl: null, buktiNamaFile: null });
@@ -4697,16 +4748,16 @@ export default function IuranWargaRTApp() {
                     </div>
                   </div>
 
-                  {/* SUSUNAN PANITIA */}
+                  {/* SUSUNAN PANITIA (RW) */}
                   <div className="border-t pt-4">
-                    <h4 className="text-slate-900 font-black text-xs mb-1">Susunan Panitia</h4>
-                    <p className="text-[10px] text-slate-400 mb-3">Nama di sini otomatis tampil di halaman Beranda. Khusus nama Bendahara RT, akan otomatis ikut tampil di setiap Kuitansi Digital warga bersama tanda tangan digitalnya.</p>
+                    <h4 className="text-slate-900 font-black text-xs mb-1">Susunan Panitia RW</h4>
+                    <p className="text-[10px] text-slate-400 mb-3">Nama di sini otomatis tampil di kartu "Struktur Pengurus RW" halaman Beranda saja. <strong>Bukan</strong> sumber nama Bendahara di Kuitansi Digital - nama &amp; tanda tangan Bendahara di kuitansi sekarang otomatis diambil dari anggota berjabatan "Bendahara" pada daftar <strong>Foto Anggota Struktur RT</strong> di bawah, supaya tidak ketuker dengan Panitia RW.</p>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <div><label className="block text-slate-600 mb-1">Ketua Panitia</label><input type="text" value={cmsForm.panitiaKetua} onChange={(e) => setCmsForm({...cmsForm, panitiaKetua: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">Sekretaris</label><input type="text" value={cmsForm.panitiaSekretaris} onChange={(e) => setCmsForm({...cmsForm, panitiaSekretaris: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div>
-                        <label className="block text-slate-600 mb-1">Bendahara RT <span className="text-emerald-700">(link ke kuitansi)</span></label>
-                        <input type="text" value={cmsForm.panitiaBendahara} onChange={(e) => setCmsForm({...cmsForm, panitiaBendahara: e.target.value})} className="w-full border p-2 rounded-xl bg-emerald-50 border-emerald-200 font-bold text-emerald-900" />
+                        <label className="block text-slate-600 mb-1">Bendahara <span className="text-slate-400">(cadangan saja)</span></label>
+                        <input type="text" value={cmsForm.panitiaBendahara} onChange={(e) => setCmsForm({...cmsForm, panitiaBendahara: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" />
                       </div>
                       <div><label className="block text-slate-600 mb-1">Humas</label><input type="text" value={cmsForm.panitiaHumas} onChange={(e) => setCmsForm({...cmsForm, panitiaHumas: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                     </div>
@@ -4751,10 +4802,12 @@ export default function IuranWargaRTApp() {
                       terlihat oleh SEMUA akun (belum login, warga, maupun admin lain). */}
                   <div className="border-t pt-4">
                     <h4 className="text-slate-900 font-black text-xs mb-1">Foto Anggota Struktur RT</h4>
-                    <p className="text-[10px] text-slate-400 mb-3">Kelola foto & nama pengurus RT. Otomatis tampil sebagai galeri foto di halaman Beranda (Web Utama) untuk semua akun. Foto diupload langsung ke Google Drive panitia (bukan base64) begitu URL Apps Script sudah disambungkan.</p>
+                    <p className="text-[10px] text-slate-400 mb-3">Kelola foto & nama pengurus RT. Otomatis tampil sebagai galeri foto di halaman Beranda (Web Utama) untuk semua akun. Foto diupload langsung ke Google Drive panitia (bukan base64) begitu URL Apps Script sudah disambungkan. <span className="text-emerald-700 font-bold">Anggota berjabatan "Bendahara" di daftar ini otomatis jadi nama & tanda tangan yang tampil di Kuitansi Digital warga.</span></p>
 
                     <div className="space-y-2 mb-4">
-                      {strukturRt.map(d => (
+                      {strukturRt.map(d => {
+                        const isBendaharaKuitansi = (d.jabatan || '').toLowerCase().includes('bendahara') && d.nama === getBendaharaRtNama();
+                        return (
                         <div key={d.id} className="flex items-center gap-3 p-2.5 bg-slate-50 border rounded-xl">
                           <div className="w-11 h-11 rounded-full border bg-white overflow-hidden shrink-0 flex items-center justify-center relative">
                             <span className="text-slate-300 text-[9px]">Foto</span>
@@ -4772,11 +4825,14 @@ export default function IuranWargaRTApp() {
                           <div className="flex-1 min-w-0">
                             <p className="font-black text-slate-900 truncate">{d.nama}</p>
                             <p className="text-emerald-700 font-bold text-[10px] uppercase tracking-wide">{d.jabatan}</p>
+                            {isBendaharaKuitansi && (
+                              <p className="text-[9px] text-emerald-600 font-bold mt-0.5">✓ Terhubung ke Kuitansi Digital</p>
+                            )}
                           </div>
                           <button type="button" onClick={() => handleEditAnggotaStruktur(d)} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded text-[10px] font-bold shrink-0">Edit</button>
                           <button type="button" onClick={() => handleHapusAnggotaStruktur(d.id)} className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded text-[10px] font-bold shrink-0">Hapus</button>
                         </div>
-                      ))}
+                      );})}
                       {strukturRt.length === 0 && <p className="text-slate-400 italic text-[11px]">Belum ada anggota struktur RT yang ditambahkan.</p>}
                     </div>
 
@@ -5207,7 +5263,7 @@ export default function IuranWargaRTApp() {
                       decoding="async"
                       alt="QR Verifikasi Kuitansi"
                       className="w-full h-full object-contain"
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=0&data=${encodeURIComponent(`KWITANSI RESMI ${selectedKuitansi.noKuitansi}\n${cmsTeks.namaRT}\nDiterima dari: ${selectedKuitansi.nama}\nNomor Rumah/Blok: ${selectedKuitansi.nomorRumah || selectedKuitansi.nama}\nBulan: ${selectedKuitansi.bulan} ${periodeTahun}\nNominal: Rp ${selectedKuitansi.nominal.toLocaleString('id-ID')}\nTanggal Pelunasan: ${pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).tanggal}\nJam Pelunasan: ${pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).jam}\nStatus: LUNAS - Diverifikasi Bendahara RT ${cmsTeks.panitiaBendahara}`)}`}
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=0&data=${encodeURIComponent(`KWITANSI RESMI ${selectedKuitansi.noKuitansi}\n${cmsTeks.namaRT}\nDiterima dari: ${selectedKuitansi.nama}\nNomor Rumah/Blok: ${selectedKuitansi.nomorRumah || selectedKuitansi.nama}\nBulan: ${selectedKuitansi.bulan} ${periodeTahun}\nNominal: Rp ${selectedKuitansi.nominal.toLocaleString('id-ID')}\nTanggal Pelunasan: ${pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).tanggal}\nJam Pelunasan: ${pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).jam}\nStatus: LUNAS - Diverifikasi Bendahara RT ${getBendaharaRtNama()}`)}`}
                       onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }}
                     />
                   </div>
@@ -5228,7 +5284,7 @@ export default function IuranWargaRTApp() {
                       <text x="50" y="78" textAnchor="middle" fill="#7f1d1d" fontSize="5" fontWeight="800" letterSpacing="0.2">SAH &amp; TERVERIFIKASI</text>
                     </svg>
                   )}
-                  <p className="text-[11px] font-bold border-t border-slate-400 pt-1 mt-1">{cmsTeks.panitiaBendahara}</p>
+                  <p className="text-[11px] font-bold border-t border-slate-400 pt-1 mt-1">{getBendaharaRtNama()}</p>
                 </div>
               </div>
               <p className="text-[9px] text-slate-400 mt-3 leading-relaxed text-center">Kuitansi ini sah dan diterbitkan otomatis oleh sistem tanpa memerlukan cap basah.</p>
