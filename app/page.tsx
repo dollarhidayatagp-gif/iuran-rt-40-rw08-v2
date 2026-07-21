@@ -126,36 +126,16 @@ export default function IuranWargaRTApp() {
   const [view, setView] = useState('landing');
 
   // ==========================================
-  // AKSES TERSEMBUNYI LOGIN PANITIA/ADMIN
+  // LOGIN ADMIN/PANITIA - SEKARANG MENYATU DENGAN LOGIN WARGA
   // -----------------------------------------------------------
-  // Tombol "Login Panitia/Admin" TIDAK ditampilkan ke pengunjung umum di
-  // menu Web Utama. Panitia membukanya SEKALI SAJA lewat tautan khusus:
-  //   https://alamat-website-anda.com/?admin=1
-  // Begitu parameter ?admin=1 terdeteksi, tombol "Login Panitia/Admin"
-  // muncul di pojok kanan atas DAN status "sudah pernah buka lewat tautan
-  // khusus ini" disimpan ke localStorage HP/browser tersebut. Artinya untuk
-  // kunjungan-kunjungan BERIKUTNYA dari perangkat yang sama, tombolnya akan
-  // otomatis tetap muncul walau membuka alamat biasa TANPA ?admin=1 lagi -
-  // jadi panitia cukup pakai tautan ?admin=1 itu SATU KALI saja per HP/laptop
-  // (atau simpan sebagai bookmark/shortcut layar utama), tidak perlu diketik
-  // ulang setiap kali mau login. Kalau ganti HP/browser baru, ulangi sekali
-  // lagi buka pakai ?admin=1.
+  // Sebelumnya akun Super Admin butuh tautan rahasia (?admin=1) supaya
+  // tombol "Login Panitia/Admin" muncul, lalu login lewat form/modal
+  // TERPISAH dari form warga. Sekarang tidak ada lagi tautan rahasia atau
+  // form terpisah: SATU form "Login Akun Warga" di Web Utama dipakai untuk
+  // SEMUA akun - baik warga biasa maupun Super Admin (username & password
+  // bawaan admin/admin123, bisa diganti di menu "Ubah Login Admin Panel").
+  // Lihat handleLogin di bawah untuk logika deteksinya.
   // ==========================================
-  const KUNCI_ADMIN_ENTRY_TERSIMPAN = 'iuran_rt_admin_entry_terlihat';
-  const [showAdminEntry, setShowAdminEntry] = useState(() => {
-    try {
-      return typeof window !== 'undefined' && window.localStorage.getItem(KUNCI_ADMIN_ENTRY_TERSIMPAN) === '1';
-    } catch (e) { return false; }
-  });
-  useEffect(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('admin') === '1') {
-        setShowAdminEntry(true);
-        window.localStorage.setItem(KUNCI_ADMIN_ENTRY_TERSIMPAN, '1');
-      }
-    } catch (e) { /* abaikan di lingkungan tanpa window.location/localStorage */ }
-  }, []);
   const [activeMenu, setActiveMenu] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false); // sidebar dashboard di mode HP (default tertutup)
 
@@ -557,6 +537,16 @@ export default function IuranWargaRTApp() {
       return next;
     });
   };
+  // Wrapper sinkronisasi khusus tunggakan (tagihan belum lunas lintas
+  // periode) -> tersimpan di sheet "Tunggakan" (dibuat otomatis oleh Apps
+  // Script bila belum ada, mengikuti pola sheet lain di aplikasi ini).
+  const updateTunggakan = (updater) => {
+    setTunggakanList(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      syncSheet('Tunggakan', next);
+      return next;
+    });
+  };
   // Wrapper sinkronisasi untuk seluruh database lain di aplikasi ini (Kegiatan,
   // Kelompok, Pengajuan warga baru, Struktur RT, Periode & Riwayat Periode)
   // supaya SEMUA data -bukan cuma Anggota & Iuran- ikut tersimpan permanen &
@@ -729,7 +719,7 @@ export default function IuranWargaRTApp() {
       const [
         dataAnggota, dataIuran, dataKegiatan, dataKelompok,
         dataPengajuan, dataStruktur, dataPengaturan, dataPeriode, dataRiwayatPeriode,
-        dataRiwayatKasRt, dataRealisasi, dataAgendaUtama, dataNotifikasi, dataWargaKeluar
+        dataRiwayatKasRt, dataRealisasi, dataAgendaUtama, dataNotifikasi, dataWargaKeluar, dataTunggakan
       ] = await Promise.all([
         sheetFetch(`${cmsTeks.appsScriptUrl}?action=getMembers`),
         sheetFetch(`${cmsTeks.appsScriptUrl}?action=getIuran`),
@@ -744,7 +734,10 @@ export default function IuranWargaRTApp() {
         sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRealisasiBelanja`),
         sheetFetch(`${cmsTeks.appsScriptUrl}?action=getAgendaUtama`),
         sheetFetch(`${cmsTeks.appsScriptUrl}?action=getNotifikasi`).catch(() => []),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getWargaKeluar`).catch(() => [])
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getWargaKeluar`).catch(() => []),
+        // Sheet "Tunggakan" mungkin belum ada di Apps Script versi lama -> .catch(() => [])
+        // supaya tidak menggagalkan pemuatan data lain (backward compatible).
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getTunggakan`).catch(() => [])
       ]);
       if (Array.isArray(dataAnggota) && dataAnggota.length) {
         setMembers(dataAnggota.map(m => ({ ...m, target: Number(m.target) || 0, anggotaKeluarga: parseAnggotaKeluarga(m.anggotaKeluarga) })));
@@ -768,6 +761,7 @@ export default function IuranWargaRTApp() {
       }
       if (Array.isArray(dataNotifikasi)) setNotifikasiList(dataNotifikasi);
       if (Array.isArray(dataWargaKeluar) && dataWargaKeluar.length) setWargaKeluarList(dataWargaKeluar);
+      if (Array.isArray(dataTunggakan)) setTunggakanList(dataTunggakan.map(t => ({ ...t, bulanId: Number(t.bulanId) || 0, nominal: Number(t.nominal) || 0, tahunAsal: Number(t.tahunAsal) || t.tahunAsal })));
       if (Array.isArray(dataPengaturan) && dataPengaturan.length) {
         const settingsRow = dataPengaturan[0];
         setCmsTeks(prev => ({
@@ -872,6 +866,34 @@ export default function IuranWargaRTApp() {
     { userNama: 'Ahmad Fauzi', bulanId: 1, bulanNama: 'Januari', nominal: 45000, status: 'LUNAS', tglBayar: '10 Januari 2026', buktiUrl: buatBuktiDummy('Ahmad Fauzi - Januari 2026'), buktiNamaFile: 'bukti_fauzi.jpg' },
     { userNama: 'Ahmad Fauzi', bulanId: 2, bulanNama: 'Februari', nominal: 45000, status: 'MENUNGGU VERIFIKASI', tglBayar: '11 Juli 2026', buktiUrl: buatBuktiDummy('Ahmad Fauzi - Februari 2026', '#b45309'), buktiNamaFile: 'bukti_fauzi2.jpg' },
   ]);
+
+  // ==========================================
+  // 3B. TUNGGAKAN (TAGIHAN BELUM LUNAS YANG DIBAWA LINTAS PERIODE)
+  // -----------------------------------------------------------
+  // PENTING: sebelum perbaikan ini, saat admin menutup periode (lihat
+  // handleTutupPeriode), SELURUH data iuranMatrix dikosongkan
+  // (updateIuran([])) -- termasuk bulan yang statusnya masih "BELUM BAYAR"
+  // / "MENUNGGU VERIFIKASI". Akibatnya tagihan warga yang belum lunas ikut
+  // "hilang" begitu saja saat periode baru dibuka, padahal warga itu
+  // sebenarnya masih berhutang/menunggak.
+  //
+  // Sekarang setiap kali admin menutup periode, seluruh baris iuran milik
+  // warga yang BELUM berstatus LUNAS otomatis dipindahkan ke sini sebagai
+  // "tunggakan" (tagihan berjalan terus, tidak ikut terhapus), lengkap
+  // dengan keterangan periode & tahun asal supaya jelas ini tunggakan dari
+  // periode yang mana. Warga tetap bisa upload bukti transfer untuk
+  // melunasi tunggakan ini dari Dashboard-nya kapan saja walau periode
+  // asalnya sudah ditutup, dan Admin punya halaman monitoring khusus
+  // (menu "Monitoring Tunggakan") untuk memantau siapa saja yang masih
+  // menunggak setelah periode ditutup.
+  //
+  // Struktur 1 baris tunggakan:
+  // { id, userId, userNama, nomorRumah, kelompok, bulanId, bulanNama,
+  //   nominal, status: 'BELUM BAYAR' | 'MENUNGGU VERIFIKASI' | 'LUNAS',
+  //   tglBayar, buktiUrl, buktiNamaFile, waktuVerifikasi,
+  //   noPeriodeAsal, tahunAsal }
+  // ==========================================
+  const [tunggakanList, setTunggakanList] = useState([]);
 
   // ==========================================
   // 4. KEGIATAN / DOKUMENTASI (DENGAN FOTO, TERARSIP PER TAHUN)
@@ -1116,10 +1138,9 @@ export default function IuranWargaRTApp() {
     }
   };
   const [adminAccount, setAdminAccount] = useState(() => bacaAdminAccountTersimpan() || { username: 'admin', password: 'admin123' });
+  // adminLoggedIn: true bila akun yang sedang aktif adalah Super Admin (login
+  // dengan username/password adminAccount lewat form Login Akun Warga yang sama).
   const [adminLoggedIn, setAdminLoggedIn] = useState(false);
-  const [showAdminLoginForm, setShowAdminLoginForm] = useState(false);
-  const [formAdminLogin, setFormAdminLogin] = useState({ username: '', password: '' });
-  const [adminLoginError, setAdminLoginError] = useState('');
   const [formAdminAccount, setFormAdminAccount] = useState({ username: 'admin', password: '', passwordBaru: '', konfirmasiPassword: '' });
   const [adminAccountMsg, setAdminAccountMsg] = useState({ tipe: '', teks: '' });
 
@@ -1167,6 +1188,10 @@ export default function IuranWargaRTApp() {
   // REAL-TIME METRIC CALCULATION (USER)
   // ==========================================
   const userRows = iuranMatrix.filter(item => item.userNama === activeUserSession.nama);
+  // Tunggakan (tagihan belum lunas dari periode yang sudah ditutup admin) milik warga yang sedang login.
+  const userTunggakan = tunggakanList.filter(item => item.userNama === activeUserSession.nama);
+  const userTunggakanBelumLunas = userTunggakan.filter(item => item.status !== 'LUNAS');
+  const userTotalTunggakan = userTunggakanBelumLunas.reduce((acc, t) => acc + Number(t.nominal || 0), 0);
   const userDanaMasuk = userRows.filter(r => r.status === 'LUNAS').reduce((acc, r) => acc + r.nominal, 0);
   const userSisaTagihan = Math.max(0, activeUserSession.target - userDanaMasuk);
   const persentaseCapaian = Math.min(100, Math.round((userDanaMasuk / activeUserSession.target) * 100));
@@ -1743,7 +1768,11 @@ export default function IuranWargaRTApp() {
   // maupun admin/bendahara (rekapan per user) kapan pun, tanpa perlu upload ulang.
   // tanggal & nominal sekarang diisi manual oleh warga (lihat formBayarInput),
   // bukan lagi nilai baku/hardcode.
-  const handleUploadBayar = (e, bulanNama, tanggalBayar, nominal) => {
+  // tunggakanId (opsional): diisi kalau warga sedang melunasi TUNGGAKAN
+  // (tagihan lama yang dibawa dari periode yang sudah ditutup admin),
+  // bukan tagihan bulan berjalan biasa. Lihat bagian "TUNGGAKAN" di
+  // Dashboard Warga untuk tempat tombol Upload Bukti tunggakan dipanggil.
+  const handleUploadBayar = (e, bulanNama, tanggalBayar, nominal, tunggakanId = null) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     if (!tanggalBayar) {
@@ -1764,20 +1793,43 @@ export default function IuranWargaRTApp() {
     }
     // JANGAN langsung upload - tampilkan dulu modal konfirmasi "mohon cek kembali
     // sebelum kirim" supaya warga bisa memastikan data sudah benar.
-    setKonfirmasiUploadBukti({ file, bulanNama, tanggalBayar, nominal });
+    setKonfirmasiUploadBukti({ file, bulanNama, tanggalBayar, nominal, tunggakanId });
     e.target.value = '';
   };
 
   // Dijalankan setelah warga menekan tombol "Kirim" di modal konfirmasi upload bukti.
   const handleKonfirmasiKirimBukti = async () => {
     if (!konfirmasiUploadBukti) return;
-    const { file, bulanNama, tanggalBayar, nominal } = konfirmasiUploadBukti;
+    const { file, bulanNama, tanggalBayar, nominal, tunggakanId } = konfirmasiUploadBukti;
     setKonfirmasiUploadBukti(null);
     showToast('Mengunggah bukti transfer...', 'sukses');
     // Bukti transfer diupload sebagai FILE ASLI ke Google Drive (folder "Bukti-Transfer"),
     // bukan base64 di sel Sheet, supaya file besar tidak gagal tersimpan (batas ~50.000
     // karakter/sel Google Sheets). Yang disimpan ke Sheet & state hanya URL Drive-nya.
     const buktiUrl = await uploadFotoKeDrive(file, 'Bukti-Transfer');
+
+    // ALUR PELUNASAN TUNGGAKAN (tagihan lama lintas periode) - beda tabel
+    // dari iuran bulan berjalan, lihat updateTunggakan di atas.
+    if (tunggakanId) {
+      updateTunggakan(prev => prev.map(t => t.id === tunggakanId ? {
+        ...t,
+        nominal: Number(nominal),
+        status: 'MENUNGGU VERIFIKASI',
+        tglBayar: formatTanggalIndo(tanggalBayar),
+        buktiUrl,
+        buktiNamaFile: file.name
+      } : t));
+      setFormBayarInput(prev => { const next = { ...prev }; delete next[`TGK-${tunggakanId}`]; return next; });
+      tambahNotifikasi({
+        untuk: 'admin',
+        judul: 'Menunggu Verifikasi Tunggakan',
+        pesan: `${activeUserSession.nama} mengupload bukti pelunasan TUNGGAKAN bulan ${bulanNama} sebesar Rp ${Number(nominal).toLocaleString('id-ID')}.`,
+        tipe: 'pending'
+      });
+      showToast(`Bukti pelunasan tunggakan ${bulanNama} berhasil diunggah! Menunggu verifikasi Bendahara.`);
+      return;
+    }
+
     const recordBaru = {
       userNama: activeUserSession.nama,
       bulanId: DAFTAR_BULAN.find(b => b.nama === bulanNama).id,
@@ -1808,31 +1860,46 @@ export default function IuranWargaRTApp() {
     showToast(`Bukti transfer ${bulanNama} berhasil diunggah! Menunggu verifikasi Bendahara.`);
   };
 
-  const handleApprovePembayaran = (userNama, bulanNama) => {
+  const handleApprovePembayaran = (userNama, bulanNama, tunggakanId = null) => {
     // Catat tanggal & jam pelunasan (waktu nyata saat Bendahara memverifikasi)
     // supaya bisa ditampilkan lengkap (tanggal + jam) di Kuitansi Digital & QR verifikasi.
     const waktuVerifikasi = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' WIB';
-    updateIuran(iuranMatrix.map(item => (item.userNama === userNama && item.bulanNama === bulanNama) ? { ...item, status: 'LUNAS', waktuVerifikasi } : item));
+    if (tunggakanId) {
+      updateTunggakan(prev => prev.map(t => t.id === tunggakanId ? { ...t, status: 'LUNAS', waktuVerifikasi } : t));
+    } else {
+      updateIuran(iuranMatrix.map(item => (item.userNama === userNama && item.bulanNama === bulanNama) ? { ...item, status: 'LUNAS', waktuVerifikasi } : item));
+    }
     const targetMember = members.find(m => m.nama === userNama);
     if (targetMember) {
       tambahNotifikasi({
         untuk: targetMember.id,
         judul: 'Pembayaran Disetujui ✅',
-        pesan: `Pembayaran iuran bulan ${bulanNama} Anda telah diverifikasi & disetujui Bendahara. Dana sudah masuk.`,
+        pesan: tunggakanId
+          ? `Pelunasan TUNGGAKAN bulan ${bulanNama} Anda telah diverifikasi & disetujui Bendahara. Dana sudah masuk.`
+          : `Pembayaran iuran bulan ${bulanNama} Anda telah diverifikasi & disetujui Bendahara. Dana sudah masuk.`,
         tipe: 'sukses'
       });
     }
     showToast(`Pembayaran ${userNama} bulan ${bulanNama} disetujui.`);
   };
 
-  const handleRejectPembayaran = (userNama, bulanNama) => {
-    updateIuran(iuranMatrix.filter(item => !(item.userNama === userNama && item.bulanNama === bulanNama)));
+  const handleRejectPembayaran = (userNama, bulanNama, tunggakanId = null) => {
+    if (tunggakanId) {
+      // Tunggakan TIDAK dihapus baris-nya (supaya tagihan tetap tercatat &
+      // termonitor) - cukup dikembalikan ke status "BELUM BAYAR" supaya
+      // warga bisa upload ulang bukti transfer yang benar.
+      updateTunggakan(prev => prev.map(t => t.id === tunggakanId ? { ...t, status: 'BELUM BAYAR', tglBayar: null, buktiUrl: null, buktiNamaFile: null } : t));
+    } else {
+      updateIuran(iuranMatrix.filter(item => !(item.userNama === userNama && item.bulanNama === bulanNama)));
+    }
     const targetMember = members.find(m => m.nama === userNama);
     if (targetMember) {
       tambahNotifikasi({
         untuk: targetMember.id,
         judul: 'Pembayaran Ditolak ✕',
-        pesan: `Bukti transfer iuran bulan ${bulanNama} Anda ditolak Bendahara. Silakan upload ulang bukti transfer yang sesuai.`,
+        pesan: tunggakanId
+          ? `Bukti pelunasan TUNGGAKAN bulan ${bulanNama} Anda ditolak Bendahara. Silakan upload ulang bukti transfer yang sesuai.`
+          : `Bukti transfer iuran bulan ${bulanNama} Anda ditolak Bendahara. Silakan upload ulang bukti transfer yang sesuai.`,
         tipe: 'gagal'
       });
     }
@@ -1843,14 +1910,36 @@ export default function IuranWargaRTApp() {
   // pada modal konfirmasi verifikasi pembayaran.
   const handleKonfirmasiVerifikasi = (sudahSesuai) => {
     if (!konfirmasiApprove) return;
-    const { userNama, bulanNama, dariPreview } = konfirmasiApprove;
+    const { userNama, bulanNama, dariPreview, tunggakanId } = konfirmasiApprove;
     if (sudahSesuai) {
-      handleApprovePembayaran(userNama, bulanNama);
+      handleApprovePembayaran(userNama, bulanNama, tunggakanId || null);
     } else {
-      handleRejectPembayaran(userNama, bulanNama);
+      handleRejectPembayaran(userNama, bulanNama, tunggakanId || null);
     }
     setKonfirmasiApprove(null);
     if (dariPreview) setPreviewBukti(null);
+  };
+
+  // ==========================================
+  // MONITORING TUNGGAKAN - HELPER RINGKASAN UNTUK ADMIN
+  // -----------------------------------------------------------
+  // Dipakai di menu "Monitoring Tunggakan" (khusus admin) supaya admin bisa
+  // langsung lihat siapa saja yang masih menunggak setelah periode ditutup,
+  // berapa total nilainya, dan dari periode mana tunggakan itu berasal.
+  // ==========================================
+  const tunggakanBelumLunas = tunggakanList.filter(t => t.status !== 'LUNAS');
+  const totalTunggakanBelumLunas = tunggakanBelumLunas.reduce((acc, t) => acc + Number(t.nominal || 0), 0);
+  const jumlahWargaMenunggak = new Set(tunggakanBelumLunas.map(t => t.userNama)).size;
+  const rekapTunggakanPerWarga = () => {
+    const map = {};
+    tunggakanBelumLunas.forEach(t => {
+      if (!map[t.userNama]) {
+        map[t.userNama] = { userNama: t.userNama, nomorRumah: t.nomorRumah, kelompok: t.kelompok, items: [], total: 0 };
+      }
+      map[t.userNama].items.push(t);
+      map[t.userNama].total += Number(t.nominal || 0);
+    });
+    return Object.values(map).sort((a, b) => b.total - a.total);
   };
 
   const toggleStatusAnggota = (id) => {
@@ -1892,6 +1981,32 @@ export default function IuranWargaRTApp() {
   const handleLogin = (e) => {
     e.preventDefault();
     setLoginError('');
+
+    // ==========================================
+    // LOGIN SUPER ADMIN - SATU FORM DENGAN LOGIN WARGA (WEB UTAMA)
+    // -----------------------------------------------------------
+    // Tidak ada lagi form/modal Admin Panel yang terpisah. Kalau username &
+    // password yang diketik di form ini cocok dengan akun Super Admin
+    // (adminAccount, bawaan admin/admin123, bisa diganti lewat menu "Ubah
+    // Login Admin Panel"), sistem langsung memberi akses Admin penuh dari
+    // sini juga - tanpa perlu tautan/tombol tersembunyi apa pun.
+    // .trim() dipakai di username & password supaya spasi tak sengaja dari
+    // keyboard HP (autocorrect/autocapitalize) tidak bikin login gagal.
+    // ==========================================
+    if (
+      formLogin.username.trim().toLowerCase() === adminAccount.username.trim().toLowerCase() &&
+      formLogin.password.trim() === adminAccount.password.trim()
+    ) {
+      setRole('admin');
+      setAdminLoggedIn(true);
+      setIsSimulatedSession(false);
+      setView('dashboard');
+      setActiveMenu('dashboard');
+      setFormLogin({ username: '', password: '' });
+      showToast('Selamat datang, Admin/Bendahara! Anda login dengan akses Admin (penuh).');
+      return;
+    }
+
     const found = members.find(m => m.username.toLowerCase() === formLogin.username.trim().toLowerCase() && m.password === formLogin.password);
     if (!found) {
       setLoginError('Username atau password salah. Periksa kembali email aktivasi/reset password Anda.');
@@ -1910,6 +2025,7 @@ export default function IuranWargaRTApp() {
       setAdminLoggedIn(true);
     } else {
       setRole('user');
+      setAdminLoggedIn(false);
     }
     setView('dashboard');
     setActiveMenu('dashboard');
@@ -1918,31 +2034,8 @@ export default function IuranWargaRTApp() {
   };
 
   // ==========================================
-  // LOGIN & LOGOUT ADMIN/PANITIA (TERPISAH)
+  // LOGOUT ADMIN/PANITIA
   // ==========================================
-  const handleAdminLogin = (e) => {
-    e.preventDefault();
-    setAdminLoginError('');
-    // .trim() juga dipakai di password (bukan cuma username) supaya spasi
-    // tak sengaja dari keyboard HP (autocorrect/autocapitalize) tidak bikin
-    // login gagal padahal username & password yang diketik sudah benar.
-    if (
-      formAdminLogin.username.trim().toLowerCase() === adminAccount.username.trim().toLowerCase() &&
-      formAdminLogin.password.trim() === adminAccount.password.trim()
-    ) {
-      setAdminLoggedIn(true);
-      setIsSimulatedSession(false);
-      setRole('admin');
-      setView('dashboard');
-      setActiveMenu('dashboard');
-      setShowAdminLoginForm(false);
-      setFormAdminLogin({ username: '', password: '' });
-      showToast('Selamat datang, Panitia/Admin!');
-    } else {
-      setAdminLoginError('Username atau password admin salah.');
-    }
-  };
-
   const handleAdminLogout = () => {
     setAdminLoggedIn(false);
     setRole('user');
@@ -2297,8 +2390,51 @@ export default function IuranWargaRTApp() {
     showToast('Kegiatan dihapus dari daftar.', 'error');
   };
 
+  // ==========================================
+  // HITUNG TAGIHAN BELUM LUNAS (CALON TUNGGAKAN) SEBELUM PERIODE DITUTUP
+  // -----------------------------------------------------------
+  // Untuk SETIAP anggota & SETIAP bulan (Jan-Des) periode yang mau ditutup:
+  // - Kalau baris iuran-nya sudah "LUNAS" -> aman, tidak perlu dibawa.
+  // - Kalau statusnya "MENUNGGU VERIFIKASI" (sudah upload bukti tapi admin
+  //   belum sempat verifikasi sebelum tutup periode) atau "BELUM BAYAR"
+  //   (tidak ada baris sama sekali) -> ini tagihan yang masih terbuka,
+  //   dibawa/carry-over sebagai tunggakan supaya TIDAK hilang & warga
+  //   tetap bisa/wajib melunasinya walau periode sudah ditutup admin.
+  // ==========================================
+  const hitungCalonTunggakan = () => {
+    const daftarTunggakanBaru = [];
+    members.forEach((m) => {
+      DAFTAR_BULAN.forEach((bln) => {
+        const rowIuran = iuranMatrix.find(r => r.userNama === m.nama && r.bulanNama === bln.nama);
+        const statusBulan = rowIuran ? rowIuran.status : 'BELUM BAYAR';
+        if (statusBulan === 'LUNAS') return; // sudah lunas, tidak jadi tunggakan
+        daftarTunggakanBaru.push({
+          id: `TGK-${periodeAktif.noPeriode}-${m.id}-${bln.id}`,
+          userId: m.id,
+          userNama: m.nama,
+          nomorRumah: m.nomorRumah || m.nama,
+          kelompok: m.kelompok,
+          bulanId: bln.id,
+          bulanNama: bln.nama,
+          nominal: rowIuran ? rowIuran.nominal : IURAN_BULANAN,
+          status: statusBulan, // 'BELUM BAYAR' atau 'MENUNGGU VERIFIKASI'
+          tglBayar: rowIuran ? (rowIuran.tglBayar || null) : null,
+          buktiUrl: rowIuran ? (rowIuran.buktiUrl || null) : null,
+          buktiNamaFile: rowIuran ? (rowIuran.buktiNamaFile || null) : null,
+          noPeriodeAsal: periodeAktif.noPeriode,
+          tahunAsal: periodeTahun,
+        });
+      });
+    });
+    return daftarTunggakanBaru;
+  };
+
   const handleTutupPeriode = () => {
-    const ok = window.confirm(`Tutup periode ${periodeAktif.noPeriode} (Tahun ${periodeTahun}) sekarang?\n\nSeluruh data anggota, riwayat iuran, dan dokumentasi kegiatan periode ini akan diarsipkan PERMANEN sebagai riwayat/laporan (tidak akan hilang). Setelah itu periode baru otomatis dibuka dengan nomor baru.`);
+    const calonTunggakan = hitungCalonTunggakan();
+    const pesanTunggakan = calonTunggakan.length > 0
+      ? `\n\n⚠️ Terdeteksi ${calonTunggakan.length} tagihan bulan yang masih BELUM LUNAS. Tagihan ini TIDAK akan dihapus - otomatis dipindahkan menjadi "Tunggakan" yang tetap berjalan/harus dilunasi warga meski periode ini ditutup, dan bisa dipantau admin lewat menu "Monitoring Tunggakan".`
+      : '';
+    const ok = window.confirm(`Tutup periode ${periodeAktif.noPeriode} (Tahun ${periodeTahun}) sekarang?\n\nSeluruh data anggota, riwayat iuran, dan dokumentasi kegiatan periode ini akan diarsipkan PERMANEN sebagai riwayat/laporan (tidak akan hilang). Setelah itu periode baru otomatis dibuka dengan nomor baru.${pesanTunggakan}`);
     if (!ok) return;
 
     const totalTerkumpul = iuranMatrix.filter(r => r.status === 'LUNAS').reduce((acc, r) => acc + r.nominal, 0);
@@ -2310,11 +2446,23 @@ export default function IuranWargaRTApp() {
       jumlahAnggota: members.length,
       jumlahKegiatan: kegiatanList.length,
       totalTerkumpul,
+      totalTunggakan: calonTunggakan.reduce((acc, t) => acc + t.nominal, 0),
+      jumlahTunggakan: calonTunggakan.length,
       members,
       iuranMatrix,
       kegiatanList,
     };
     updateRiwayatPeriode(prev => [arsip, ...prev]);
+
+    // Tagihan yang belum lunas DIBAWA (bukan dihapus) ke tunggakanList. Kalau
+    // sebelumnya sudah ada baris tunggakan lama dengan id yang sama (jarang
+    // terjadi, jaga-jaga tutup periode dobel), baris lama diganti baris baru.
+    if (calonTunggakan.length > 0) {
+      updateTunggakan(prev => {
+        const idBaru = new Set(calonTunggakan.map(t => t.id));
+        return [...prev.filter(t => !idBaru.has(t.id)), ...calonTunggakan];
+      });
+    }
 
     const urutBaru = nomorUrutPeriode + 1;
     const tahunBaru = periodeTahun + 1;
@@ -2324,7 +2472,7 @@ export default function IuranWargaRTApp() {
     updatePeriode({ noPeriode: noPeriodeBaru, tahun: tahunBaru, status: 'Berjalan', tanggalMulai: `01 Jan ${tahunBaru}` });
     updateIuran([]);
     updateKegiatan([]);
-    showToast(`Periode ${arsip.noPeriode} ditutup & diarsipkan. Periode baru ${noPeriodeBaru} resmi dibuka.`);
+    showToast(`Periode ${arsip.noPeriode} ditutup & diarsipkan. Periode baru ${noPeriodeBaru} resmi dibuka.${calonTunggakan.length > 0 ? ` ${calonTunggakan.length} tagihan belum lunas dipindahkan jadi tunggakan.` : ''}`);
   };
 
   // ==========================================
@@ -2471,10 +2619,12 @@ export default function IuranWargaRTApp() {
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           {/*
-            PISAH TAMPILAN SESUAI LOGIN:
-            - Belum login admin  -> hanya ada "Web Utama" & "Dashboard Warga" (warga login lewat form di halaman utama).
-            - Sudah login admin  -> hanya ada "Web Utama" & "Admin Panel" (tombol Dashboard Warga disembunyikan),
-              plus tombol keluar. Admin Panel HANYA bisa diakses lewat handleAdminLogin (bukan tombol bebas lagi).
+            PISAH TAMPILAN SESUAI LOGIN (SATU FORM LOGIN UNTUK SEMUA AKUN):
+            - Belum login sama sekali -> hanya ada "Web Utama" & "Dashboard Warga" (warga login lewat form
+              "Login Akun Warga" di halaman utama; Super Admin JUGA login lewat form yang SAMA memakai
+              username/password admin - lihat handleLogin).
+            - Sudah login sebagai Admin (adminLoggedIn true) -> hanya ada "Web Utama" & "Admin Panel"
+              (tombol Dashboard Warga disembunyikan), plus tombol keluar.
           */}
           {!adminLoggedIn ? (
             <>
@@ -2483,9 +2633,6 @@ export default function IuranWargaRTApp() {
                 <button onClick={() => { setView('landing'); }} className={`px-3 py-1 rounded-md text-[11px] ${view === 'landing' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400'}`}>Web Utama</button>
                 <button onClick={() => { setRole('user'); setView('dashboard'); setActiveMenu('dashboard'); }} className={`px-3 py-1 rounded-md text-[11px] ${role === 'user' && view === 'dashboard' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400'}`}>Dashboard Warga</button>
               </div>
-              {showAdminEntry && (
-                <button onClick={() => setShowAdminLoginForm(true)} className="text-[10px] font-bold text-slate-500 hover:text-amber-400 underline underline-offset-2 ml-1">Login Panitia/Admin</button>
-              )}
             </>
           ) : (
             <>
@@ -2499,23 +2646,6 @@ export default function IuranWargaRTApp() {
           )}
         </div>
       </div>
-
-      {/* MODAL LOGIN ADMIN/PANITIA - TERPISAH DARI LOGIN WARGA */}
-      {showAdminLoginForm && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex justify-center items-center p-4 z-50 anim-fade">
-          <div className="bg-white w-full max-w-xs rounded-3xl p-6 relative border shadow-2xl anim-pop">
-            <button onClick={() => { setShowAdminLoginForm(false); setAdminLoginError(''); }} className="absolute top-3 right-3 bg-slate-100 text-slate-700 w-7 h-7 rounded-full font-black text-xs">✕</button>
-            <h3 className="text-sm font-black text-slate-900 text-center mb-1">Login Panitia / Admin</h3>
-            <p className="text-[10px] text-slate-400 text-center mb-4">Khusus panitia. Akses Admin Panel tidak muncul sebelum login berhasil di sini.</p>
-            <form onSubmit={handleAdminLogin} className="space-y-3 text-xs font-semibold">
-              <div><label className="block mb-1 text-slate-600">Username Admin</label><input type="text" required autoCapitalize="none" autoCorrect="off" autoComplete="username" spellCheck="false" value={formAdminLogin.username} onChange={(e) => setFormAdminLogin({...formAdminLogin, username: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
-              <div><label className="block mb-1 text-slate-600">Password Admin</label><input type="password" required autoCapitalize="none" autoCorrect="off" autoComplete="current-password" spellCheck="false" value={formAdminLogin.password} onChange={(e) => setFormAdminLogin({...formAdminLogin, password: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
-              {adminLoginError && <p className="text-[11px] font-bold text-rose-600">{adminLoginError}</p>}
-              <button type="submit" className="w-full bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold p-2.5 rounded-xl transition-transform duration-150 hover:scale-[1.01]">🔑 Masuk Admin Panel</button>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* =========================================================================
           VIEW 1: LANDING PAGE / WEBSITE UTAMA
@@ -2744,8 +2874,8 @@ export default function IuranWargaRTApp() {
 
               {/* FORM LOGIN RESMI (USERNAME & PASSWORD) */}
               <div className="bg-white p-6 rounded-3xl border shadow-xs h-fit">
-                <h3 className="text-sm font-black text-slate-900 text-center mb-1">Login Akun Warga</h3>
-                <p className="text-[10px] text-slate-400 text-center mb-4">Masuk menggunakan username &amp; password yang dikirim ke WA Anda saat aktivasi.</p>
+                <h3 className="text-sm font-black text-slate-900 text-center mb-1">Login Akun Warga / Admin</h3>
+                <p className="text-[10px] text-slate-400 text-center mb-4">Satu form untuk semua akun: warga masuk dengan username &amp; password yang dikirim ke WA saat aktivasi, Panitia/Admin masuk dengan akun Super Admin.</p>
                 <form onSubmit={handleLogin} className="space-y-3 text-xs font-semibold">
                   <div><label className="block mb-1 text-slate-600">Username</label><input type="text" required placeholder="hidayat123" value={formLogin.username} onChange={(e) => setFormLogin({...formLogin, username: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                   <div><label className="block mb-1 text-slate-600">Password</label><input type="password" required placeholder="••••••••" value={formLogin.password} onChange={(e) => setFormLogin({...formLogin, password: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
@@ -3022,8 +3152,14 @@ export default function IuranWargaRTApp() {
                     <span className="text-[9px] text-blue-300 uppercase px-4 block mb-1">Bendahara Control</span>
                     <button onClick={() => setActiveMenu('pending-pembayaran')} className={`menu-btn w-full text-left px-4 py-2 rounded-xl flex items-center justify-between ${activeMenu === 'pending-pembayaran' ? 'bg-amber-500 text-slate-950 shadow-lg' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>
                       <span>Pending Iuran</span>
-                      {iuranMatrix.filter(r => r.status === 'MENUNGGU VERIFIKASI').length > 0 && (
-                        <span className="bg-rose-600 text-white text-[9px] font-black w-4.5 h-4.5 min-w-[18px] min-h-[18px] rounded-full flex items-center justify-center">{iuranMatrix.filter(r => r.status === 'MENUNGGU VERIFIKASI').length}</span>
+                      {(iuranMatrix.filter(r => r.status === 'MENUNGGU VERIFIKASI').length + tunggakanList.filter(t => t.status === 'MENUNGGU VERIFIKASI').length) > 0 && (
+                        <span className="bg-rose-600 text-white text-[9px] font-black w-4.5 h-4.5 min-w-[18px] min-h-[18px] rounded-full flex items-center justify-center">{iuranMatrix.filter(r => r.status === 'MENUNGGU VERIFIKASI').length + tunggakanList.filter(t => t.status === 'MENUNGGU VERIFIKASI').length}</span>
+                      )}
+                    </button>
+                    <button onClick={() => setActiveMenu('monitoring-tunggakan')} className={`menu-btn w-full text-left px-4 py-2 rounded-xl flex items-center justify-between ${activeMenu === 'monitoring-tunggakan' ? 'bg-rose-600 text-white shadow-lg' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>
+                      <span>Monitoring Tunggakan</span>
+                      {jumlahWargaMenunggak > 0 && (
+                        <span className="bg-rose-600 text-white text-[9px] font-black w-4.5 h-4.5 min-w-[18px] min-h-[18px] rounded-full flex items-center justify-center">{jumlahWargaMenunggak}</span>
                       )}
                     </button>
                     <button onClick={() => setActiveMenu('realisasi-belanja')} className={`menu-btn w-full text-left px-4 py-2 rounded-xl ${activeMenu === 'realisasi-belanja' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Realisasi Belanja Kas RT</button>
@@ -3281,6 +3417,79 @@ export default function IuranWargaRTApp() {
                       </div>
                     </div>
 
+                    {/* TUNGGAKAN PERIODE SEBELUMNYA - tagihan belum lunas yang dibawa dari periode
+                        yang sudah ditutup Admin. Tagihan ini TERUS BERLANJUT (tidak hilang) sampai
+                        benar-benar dilunasi & diverifikasi Bendahara, walau periode asalnya sudah ditutup. */}
+                    {userTunggakan.length > 0 && (
+                      <div className="bg-rose-50 border border-rose-200 p-6 rounded-2xl shadow-xs">
+                        <div className="flex justify-between items-center border-b border-rose-200 pb-2 mb-4 flex-wrap gap-1">
+                          <h3 className="text-xs font-extrabold text-rose-800 uppercase tracking-wider">⚠️ Tunggakan Periode Sebelumnya</h3>
+                          <p className="text-[10px] text-rose-500 font-bold">Total belum lunas: Rp {userTotalTunggakan.toLocaleString('id-ID')}</p>
+                        </div>
+                        <p className="text-[10px] text-rose-600 -mt-2 mb-3">Tagihan bulan-bulan berikut belum lunas sejak periode sebelumnya ditutup Admin. Tagihan ini tetap berjalan &amp; wajib dilunasi - upload bukti transfer kapan saja untuk melunasinya.</p>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-[11px] font-semibold">
+                            <thead>
+                              <tr className="text-rose-400 uppercase text-[9px] text-left border-b border-rose-200">
+                                <th className="py-2 pr-2">Bulan / Tahun</th>
+                                <th className="py-2 pr-2">Periode Asal</th>
+                                <th className="py-2 pr-2">Nominal</th>
+                                <th className="py-2 pr-2">Status</th>
+                                <th className="py-2 pr-2">Aksi</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {userTunggakan.map((t) => {
+                                const inputBayar = formBayarInput[`TGK-${t.id}`] || { tanggal: '', nominal: t.nominal || IURAN_BULANAN };
+                                return (
+                                  <tr key={t.id} className="border-b border-rose-100 last:border-0">
+                                    <td className="py-2.5 pr-2 text-slate-900 font-black">{t.bulanNama} {t.tahunAsal}</td>
+                                    <td className="py-2.5 pr-2 text-slate-500">{t.noPeriodeAsal}</td>
+                                    <td className="py-2.5 pr-2 text-slate-700">
+                                      {t.status === 'BELUM BAYAR' ? (
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-slate-400 font-normal">Rp</span>
+                                          <input
+                                            type="number"
+                                            min="1"
+                                            value={inputBayar.nominal}
+                                            onChange={(e) => setFormBayarInput({ ...formBayarInput, [`TGK-${t.id}`]: { ...inputBayar, nominal: e.target.value } })}
+                                            className="w-24 border p-1 rounded-lg bg-white font-bold"
+                                          />
+                                        </div>
+                                      ) : (
+                                        <>Rp {Number(t.nominal).toLocaleString('id-ID')}</>
+                                      )}
+                                      {t.status === 'BELUM BAYAR' && (
+                                        <input
+                                          type="date"
+                                          value={inputBayar.tanggal}
+                                          onChange={(e) => setFormBayarInput({ ...formBayarInput, [`TGK-${t.id}`]: { ...inputBayar, tanggal: e.target.value } })}
+                                          className="border p-1 rounded-lg bg-white font-bold text-slate-700 mt-1 block"
+                                        />
+                                      )}
+                                    </td>
+                                    <td className="py-2.5 pr-2"><BadgeStatus status={t.status} /></td>
+                                    <td className="py-2.5 pr-2 text-right">
+                                      {t.status === 'BELUM BAYAR' && (
+                                        <label className="bg-gradient-to-br from-rose-700 via-rose-800 to-rose-900 text-white px-3 py-1.5 rounded-lg text-[10px] transition-transform hover:scale-[1.03] cursor-pointer whitespace-nowrap inline-block">
+                                          Lunasi / Upload Bukti
+                                          <input type="file" accept="image/*,.pdf" className="hidden" onChange={(e) => handleUploadBayar(e, t.bulanNama, inputBayar.tanggal, inputBayar.nominal, t.id)} />
+                                        </label>
+                                      )}
+                                      {t.status === 'MENUNGGU VERIFIKASI' && (
+                                        <span className="text-amber-600 text-[10px] font-bold whitespace-nowrap">Menunggu Bendahara</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
                     {/* RIWAYAT PEMBAYARAN + UPLOAD BUKTI (SATU TEMPAT, TIDAK DOBLE) */}
                     <div className="bg-white p-6 rounded-2xl border shadow-xs">
                       <div className="flex justify-between items-center border-b pb-2 mb-4 flex-wrap gap-1">
@@ -3383,7 +3592,7 @@ export default function IuranWargaRTApp() {
                       <NotifikasiBell />
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-bold">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-xs font-bold">
                       <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white p-5 rounded-2xl">
                         <span className="text-slate-400 block uppercase text-[10px]">Total Kas Global</span>
                         <p className="text-lg font-black">Rp {totalDanaMasukGlobal.toLocaleString('id-ID')}</p>
@@ -3400,6 +3609,11 @@ export default function IuranWargaRTApp() {
                         <span className="text-slate-400 block uppercase text-[10px]">Total Warga</span>
                         <p className="text-lg font-black text-slate-900">{jumlahAktif} Jiwa</p>
                       </div>
+                      <button onClick={() => setActiveMenu('monitoring-tunggakan')} className="bg-rose-50 border border-rose-200 p-5 rounded-2xl text-left transition-transform hover:scale-[1.02]">
+                        <span className="text-rose-500 block uppercase text-[10px]">⚠️ Tunggakan Periode Lalu</span>
+                        <p className="text-lg font-black text-rose-700">Rp {totalTunggakanBelumLunas.toLocaleString('id-ID')}</p>
+                        <span className="text-[9px] text-rose-500 font-semibold">{jumlahWargaMenunggak} warga menunggak →</span>
+                      </button>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -4018,15 +4232,15 @@ export default function IuranWargaRTApp() {
               </div>
             )}
 
-            {/* PENDING PEMBAYARAN BENDAHARA */}
+            {/* PENDING PEMBAYARAN BENDAHARA (IURAN BERJALAN + PELUNASAN TUNGGAKAN) */}
             {activeMenu === 'pending-pembayaran' && role === 'admin' && (
               <div className="bg-white p-6 rounded-2xl border shadow-xs space-y-4">
                 <h3 className="text-sm font-black text-slate-900">List Verifikasi Pembayaran Pending</h3>
-                <p className="text-[11px] text-slate-400 -mt-2">Klik "Lihat Bukti" untuk membuka foto/file transfer yang diunggah warga, lalu Setujui bila dana sudah masuk.</p>
+                <p className="text-[11px] text-slate-400 -mt-2">Klik "Lihat Bukti" untuk membuka foto/file transfer yang diunggah warga, lalu Setujui bila dana sudah masuk. Termasuk pelunasan tunggakan (ditandai label TUNGGAKAN).</p>
                 <div className="space-y-2 text-xs font-semibold">
                   {iuranMatrix.filter(r => r.status === 'MENUNGGU VERIFIKASI').map((req, idx) => (
-                    <div key={idx} className="p-3 bg-slate-50 border rounded-xl flex justify-between items-center flex-wrap gap-2">
-                      <div><strong>{req.userNama}</strong><p className="text-slate-400">Bulan {req.bulanNama} | Rp {req.nominal.toLocaleString('id-ID')} {req.buktiNamaFile ? `| File: ${req.buktiNamaFile}` : ''}</p></div>
+                    <div key={`iuran-${idx}`} className="p-3 bg-slate-50 border rounded-xl flex justify-between items-center flex-wrap gap-2">
+                      <div><strong>{req.userNama}</strong><p className="text-slate-400">Bulan {req.bulanNama} {periodeTahun} | Rp {req.nominal.toLocaleString('id-ID')} {req.buktiNamaFile ? `| File: ${req.buktiNamaFile}` : ''}</p></div>
                       <div className="flex gap-2">
                         <button onClick={() => setPreviewBukti({ ...req })} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded-lg">Lihat Bukti</button>
                         <button onClick={() => handleRejectPembayaran(req.userNama, req.bulanNama)} className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded-lg">Tolak</button>
@@ -4034,10 +4248,77 @@ export default function IuranWargaRTApp() {
                       </div>
                     </div>
                   ))}
-                  {iuranMatrix.filter(r => r.status === 'MENUNGGU VERIFIKASI').length === 0 && <p className="text-slate-400 italic">Antrean kosong.</p>}
+                  {tunggakanList.filter(t => t.status === 'MENUNGGU VERIFIKASI').map((req) => (
+                    <div key={`tunggakan-${req.id}`} className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex justify-between items-center flex-wrap gap-2">
+                      <div>
+                        <strong>{req.userNama}</strong>
+                        <span className="ml-2 bg-rose-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full uppercase align-middle">Tunggakan</span>
+                        <p className="text-slate-400">Bulan {req.bulanNama} {req.tahunAsal} (periode {req.noPeriodeAsal}) | Rp {Number(req.nominal).toLocaleString('id-ID')} {req.buktiNamaFile ? `| File: ${req.buktiNamaFile}` : ''}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={() => setPreviewBukti({ ...req, tunggakanId: req.id })} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded-lg">Lihat Bukti</button>
+                        <button onClick={() => handleRejectPembayaran(req.userNama, req.bulanNama, req.id)} className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded-lg">Tolak</button>
+                        <button onClick={() => setKonfirmasiApprove({ userNama: req.userNama, bulanNama: req.bulanNama, nominal: req.nominal, dariPreview: false, tunggakanId: req.id })} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg">Setujui</button>
+                      </div>
+                    </div>
+                  ))}
+                  {iuranMatrix.filter(r => r.status === 'MENUNGGU VERIFIKASI').length === 0 && tunggakanList.filter(t => t.status === 'MENUNGGU VERIFIKASI').length === 0 && <p className="text-slate-400 italic">Antrean kosong.</p>}
                 </div>
               </div>
             )}
+
+            {/* MONITORING TUNGGAKAN (ADMIN) - PANTAU WARGA YANG MASIH MENUNGGAK
+                SETELAH PERIODE DITUTUP. Menampilkan siapa saja yang masih punya
+                tagihan belum lunas (baik yang masih BELUM BAYAR maupun yang sudah
+                upload tapi MENUNGGU VERIFIKASI), berikut asal periode & tahunnya. */}
+            {activeMenu === 'monitoring-tunggakan' && role === 'admin' && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs font-bold">
+                  <div className="bg-gradient-to-br from-rose-800 via-rose-900 to-slate-950 text-white p-5 rounded-2xl">
+                    <span className="text-rose-200 block uppercase text-[10px]">Total Tunggakan Belum Lunas</span>
+                    <p className="text-lg font-black">Rp {totalTunggakanBelumLunas.toLocaleString('id-ID')}</p>
+                  </div>
+                  <div className="bg-white p-5 rounded-2xl border">
+                    <span className="text-slate-400 block uppercase text-[10px]">Warga Menunggak</span>
+                    <p className="text-lg font-black text-rose-600">{jumlahWargaMenunggak} Warga</p>
+                  </div>
+                  <div className="bg-white p-5 rounded-2xl border">
+                    <span className="text-slate-400 block uppercase text-[10px]">Jumlah Bulan Tertunggak</span>
+                    <p className="text-lg font-black text-slate-900">{tunggakanBelumLunas.length} Bulan</p>
+                  </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-2xl border shadow-xs">
+                  <h3 className="text-sm font-black text-slate-900 mb-1">Rekap Tunggakan per Warga</h3>
+                  <p className="text-[11px] text-slate-400 mb-4">Tagihan ini otomatis dipindahkan ke sini saat Admin menutup periode dan bulan tersebut belum berstatus LUNAS. Tetap berjalan &amp; bisa dilunasi warga kapan saja lewat Dashboard-nya (menu "Tunggakan Periode Sebelumnya"), atau verifikasi buktinya lewat menu "Pending Iuran".</p>
+                  {rekapTunggakanPerWarga().length === 0 ? (
+                    <p className="text-slate-400 italic text-xs">🎉 Tidak ada warga yang menunggak saat ini.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {rekapTunggakanPerWarga().map((w) => (
+                        <div key={w.userNama} className="border rounded-xl p-4">
+                          <div className="flex justify-between items-center flex-wrap gap-2 mb-2">
+                            <div>
+                              <p className="font-black text-slate-900 text-xs">{w.userNama}</p>
+                              <p className="text-[10px] text-slate-400">{w.nomorRumah} • {w.kelompok}</p>
+                            </div>
+                            <span className="bg-rose-100 text-rose-700 text-[11px] font-black px-3 py-1 rounded-full">Rp {w.total.toLocaleString('id-ID')}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {w.items.map((it) => (
+                              <span key={it.id} className={`text-[10px] font-bold px-2 py-1 rounded-lg ${it.status === 'MENUNGGU VERIFIKASI' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                                {it.bulanNama} {it.tahunAsal} ({it.noPeriodeAsal}) - {it.status === 'MENUNGGU VERIFIKASI' ? 'Menunggu Verifikasi' : 'Belum Bayar'}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
 
             {/* REALISASI BELANJA KAS RT (BENDAHARA/ADMIN, BUKTI FOTO -> TAMPIL DI DASHBOARD WARGA ASLI) */}
             {activeMenu === 'realisasi-belanja' && role === 'admin' && (
@@ -4627,7 +4908,7 @@ export default function IuranWargaRTApp() {
                 {/* UBAH USERNAME & PASSWORD LOGIN ADMIN PANEL */}
                 <div className="bg-white p-6 rounded-2xl border shadow-xs text-xs font-semibold">
                   <h3 className="text-sm font-black text-slate-900">Ubah Login Admin Panel</h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5 mb-3">Username &amp; password ini yang dipakai untuk masuk ke Admin Panel dari tombol "Login Panitia/Admin" di Web Utama.</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5 mb-3">Username &amp; password ini yang dipakai untuk masuk ke Admin Panel dari form "Login Akun Warga / Admin" di Web Utama (form yang sama dengan login warga).</p>
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 flex items-center justify-between flex-wrap gap-2">
                     <span className="text-amber-800">Username &amp; password admin saat ini (akses admin penuh): <strong className="font-mono">{adminAccount.username}</strong> / <strong className="font-mono">{adminOwnPasswordVisible ? adminAccount.password : '••••••••'}</strong></span>
                     <button type="button" onClick={() => setAdminOwnPasswordVisible(v => !v)} className="text-emerald-700 font-bold text-[11px] underline underline-offset-2 shrink-0">
@@ -4875,8 +5156,8 @@ export default function IuranWargaRTApp() {
 
                 {role === 'admin' && previewBukti.status === 'MENUNGGU VERIFIKASI' && (
                   <div className="flex gap-2 pt-2">
-                    <button onClick={() => { handleRejectPembayaran(previewBukti.userNama, previewBukti.bulanNama); setPreviewBukti(null); }} className="flex-1 bg-rose-100 text-rose-700 font-bold py-2 rounded-xl text-[11px]">Tolak</button>
-                    <button onClick={() => setKonfirmasiApprove({ userNama: previewBukti.userNama, bulanNama: previewBukti.bulanNama, nominal: previewBukti.nominal, dariPreview: true })} className="flex-1 bg-emerald-600 text-white font-bold py-2 rounded-xl text-[11px]">✓ Setujui (Dana Masuk)</button>
+                    <button onClick={() => { handleRejectPembayaran(previewBukti.userNama, previewBukti.bulanNama, previewBukti.tunggakanId || null); setPreviewBukti(null); }} className="flex-1 bg-rose-100 text-rose-700 font-bold py-2 rounded-xl text-[11px]">Tolak</button>
+                    <button onClick={() => setKonfirmasiApprove({ userNama: previewBukti.userNama, bulanNama: previewBukti.bulanNama, nominal: previewBukti.nominal, dariPreview: true, tunggakanId: previewBukti.tunggakanId || null })} className="flex-1 bg-emerald-600 text-white font-bold py-2 rounded-xl text-[11px]">✓ Setujui (Dana Masuk)</button>
                   </div>
                 )}
               </div>
@@ -4989,7 +5270,8 @@ export default function IuranWargaRTApp() {
             <div className="text-center pt-2">
               <span className="text-3xl">🔎</span>
               <h4 className="font-black text-slate-900 text-sm mt-2">Apakah jumlah sudah sesuai?</h4>
-              <p className="text-slate-400 mt-1">{konfirmasiApprove.userNama} • Bulan {konfirmasiApprove.bulanNama} {periodeTahun}{konfirmasiApprove.nominal ? ` • Rp ${Number(konfirmasiApprove.nominal).toLocaleString('id-ID')}` : ''}</p>
+              {konfirmasiApprove.tunggakanId && <span className="inline-block bg-rose-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full uppercase mt-1">Pelunasan Tunggakan</span>}
+              <p className="text-slate-400 mt-1">{konfirmasiApprove.userNama} • Bulan {konfirmasiApprove.bulanNama}{konfirmasiApprove.nominal ? ` • Rp ${Number(konfirmasiApprove.nominal).toLocaleString('id-ID')}` : ''}</p>
             </div>
             <div className="flex gap-2 pt-1">
               <button onClick={() => handleKonfirmasiVerifikasi(false)} className="flex-1 bg-rose-100 text-rose-700 font-bold py-2.5 rounded-xl">Tidak, Tolak</button>
