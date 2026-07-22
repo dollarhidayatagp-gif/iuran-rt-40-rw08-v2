@@ -847,10 +847,23 @@ export default function IuranWargaRTApp() {
       if (Array.isArray(dataIuran)) {
         setIuranMatrix(dataIuran.map(i => ({ ...i, bulanId: Number(i.bulanId) || 0, nominal: Number(i.nominal) || 0 })));
       }
-      if (Array.isArray(dataKegiatan) && dataKegiatan.length) setKegiatanList(dataKegiatan.map(k => ({ ...k, foto: toDirectImageUrl(k.foto) })));
-      if (Array.isArray(dataKelompok) && dataKelompok.length) setKelompokList(dataKelompok.map(k => ({ ...k, kapasitas: Number(k.kapasitas) || 0 })));
+      // (lihat catatan perbaikan bug yang sama di dataStruktur di bawah) -
+      // dataKegiatan & dataKelompok juga dikelola admin lewat tambah/hapus,
+      // jadi kalau memang dikosongkan total di Sheet, tampilan harus ikut kosong.
+      if (Array.isArray(dataKegiatan)) setKegiatanList(dataKegiatan.map(k => ({ ...k, foto: toDirectImageUrl(k.foto) })));
+      if (Array.isArray(dataKelompok)) setKelompokList(dataKelompok.map(k => ({ ...k, kapasitas: Number(k.kapasitas) || 0 })));
       if (Array.isArray(dataPengajuan)) setPengajuanBaru(dataPengajuan.map(p => ({ ...p, target: Number(p.target) || 0, anggotaKeluarga: parseAnggotaKeluarga(p.anggotaKeluarga) })));
-      if (Array.isArray(dataStruktur) && dataStruktur.length) setStrukturRt(dataStruktur.map(d => ({ ...d, foto: toDirectImageUrl(d.foto) })));
+      // PERBAIKAN BUG: sebelumnya pakai syarat "dataStruktur.length" (harus ada
+      // isinya) sebelum mau meng-update strukturRt. Akibatnya kalau Admin
+      // menghapus SEMUA baris di sheet "StrukturRT" langsung dari Google
+      // Sheets (jadi hasil GET-nya array kosong []), aplikasi TIDAK PERNAH
+      // mengosongkan strukturRt di memori -> data lama/dummy tetap nyangkut
+      // di state, dan setiap kali admin tambah anggota baru lewat form,
+      // data lama itu ikut ter-sync ulang (atau kalau state browser belum
+      // sempat sinkron sama sekali, entri baru terasa "tidak masuk" karena
+      // ketimpa balik oleh state lama saat auto-refresh). Sekarang SELALU
+      // ikuti apa pun isi sheet (termasuk kalau memang kosong).
+      if (Array.isArray(dataStruktur)) setStrukturRt(dataStruktur.map(d => ({ ...d, foto: toDirectImageUrl(d.foto) })));
       if (Array.isArray(dataPeriode) && dataPeriode.length) setPeriodeAktif(dataPeriode[0]);
       if (Array.isArray(dataRiwayatPeriode)) setRiwayatPeriode(dataRiwayatPeriode);
       if (Array.isArray(dataRiwayatKasRt) && dataRiwayatKasRt.length) setRiwayatKasRt(dataRiwayatKasRt.map(t => ({ ...t, nominal: Number(t.nominal) || 0 })));
@@ -861,7 +874,7 @@ export default function IuranWargaRTApp() {
         setFormAgendaUtama(agendaNormal);
       }
       if (Array.isArray(dataNotifikasi)) setNotifikasiList(dataNotifikasi);
-      if (Array.isArray(dataWargaKeluar) && dataWargaKeluar.length) setWargaKeluarList(dataWargaKeluar);
+      if (Array.isArray(dataWargaKeluar)) setWargaKeluarList(dataWargaKeluar);
       if (Array.isArray(dataTunggakan)) setTunggakanList(dataTunggakan.map(t => ({ ...t, bulanId: Number(t.bulanId) || 0, nominal: Number(t.nominal) || 0, tahunAsal: Number(t.tahunAsal) || t.tahunAsal })));
       if (Array.isArray(dataPengaturan) && dataPengaturan.length) {
         const settingsRow = dataPengaturan[0];
@@ -1027,6 +1040,23 @@ export default function IuranWargaRTApp() {
   // Label rentang periode berjalan, contoh: "Juli 2026 - Juni 2027" (otomatis
   // mengikuti tahunOffset kalau periode menyeberang tahun kalender).
   const labelRentangPeriode = `${DAFTAR_BULAN[0].nama} ${periodeTahun} - ${DAFTAR_BULAN[11].nama} ${periodeTahun + DAFTAR_BULAN[11].tahunOffset}`;
+
+  // ==========================================
+  // PERBAIKAN BUG: "Tahun bulan Januari-Juni tetap tertulis 2026, padahal
+  // periode dimulai Juli 2026 jadi seharusnya Januari-Juni 2027".
+  // -----------------------------------------------------------
+  // Banyak tempat di tampilan (tabel Riwayat Pembayaran, Kuitansi Digital,
+  // Verifikasi Pembayaran, dst) sebelumnya menulis "{namaBulan} {periodeTahun}"
+  // secara langsung, padahal periodeTahun cuma tahun AWAL periode (mis. 2026).
+  // Begitu periode menyeberang tahun kalender (mis. mulai Juli), bulan-bulan
+  // Januari-Juni yang sebenarnya tahun BERIKUTNYA (2027) ikut tertulis 2026.
+  // getTahunUntukBulan mencari tahunOffset bulan tsb di DAFTAR_BULAN dan
+  // menambahkannya ke periodeTahun, supaya tahun yang tampil selalu benar.
+  // ==========================================
+  const getTahunUntukBulan = (namaBulan) => {
+    const info = DAFTAR_BULAN.find(b => b.nama === namaBulan);
+    return periodeTahun + (info ? info.tahunOffset : 0);
+  };
 
   // Simpan pengaturan tanggal mulai periode baru dari form admin.
   const handleSimpanPengaturanPeriode = (e) => {
@@ -2716,7 +2746,7 @@ export default function IuranWargaRTApp() {
           buktiUrl: rowIuran ? (rowIuran.buktiUrl || null) : null,
           buktiNamaFile: rowIuran ? (rowIuran.buktiNamaFile || null) : null,
           noPeriodeAsal: periodeAktif.noPeriode,
-          tahunAsal: periodeTahun,
+          tahunAsal: getTahunUntukBulan(bln.nama),
         });
       });
     });
@@ -3831,7 +3861,7 @@ export default function IuranWargaRTApp() {
                               const inputBayar = formBayarInput[bln.nama] || { tanggal: '', nominal: userCicilanSuggest || IURAN_BULANAN };
                               return (
                                 <tr key={bln.id} className="border-b last:border-0 hover:bg-slate-50 transition-colors">
-                                  <td className="py-2.5 pr-2 text-slate-900 font-black">{bln.nama} {periodeTahun}</td>
+                                  <td className="py-2.5 pr-2 text-slate-900 font-black">{bln.nama} {getTahunUntukBulan(bln.nama)}</td>
                                   <td className="py-2.5 pr-2 text-slate-500">Ke-{bln.id}</td>
                                   <td className="py-2.5 pr-2 text-slate-700">
                                     {status === 'BELUM BAYAR' ? (
@@ -4086,7 +4116,7 @@ export default function IuranWargaRTApp() {
                             {riwayatPembayaranAdminTampil.map((r, i) => (
                                 <tr key={i} className="border-b last:border-0 hover:bg-slate-50 transition-colors">
                                   <td className="py-2.5 pr-2 text-slate-900 font-black">{r.userNama}</td>
-                                  <td className="py-2.5 pr-2 text-slate-500">{r.bulanNama} {periodeTahun}</td>
+                                  <td className="py-2.5 pr-2 text-slate-500">{r.bulanNama} {getTahunUntukBulan(r.bulanNama)}</td>
                                   <td className="py-2.5 pr-2 text-slate-700">Rp {r.nominal.toLocaleString('id-ID')}</td>
                                   <td className="py-2.5 pr-2"><BadgeStatus status={r.status} /></td>
                                   <td className="py-2.5 pr-2 text-slate-400">{r.tglBayar || '-'}</td>
@@ -4568,7 +4598,7 @@ export default function IuranWargaRTApp() {
                 <div className="space-y-2 text-xs font-semibold">
                   {iuranMatrix.filter(r => r.status === 'MENUNGGU VERIFIKASI').map((req, idx) => (
                     <div key={`iuran-${idx}`} className="p-3 bg-slate-50 border rounded-xl flex justify-between items-center flex-wrap gap-2">
-                      <div><strong>{req.userNama}</strong><p className="text-slate-400">Bulan {req.bulanNama} {periodeTahun} | Rp {req.nominal.toLocaleString('id-ID')} {req.buktiNamaFile ? `| File: ${req.buktiNamaFile}` : ''}</p></div>
+                      <div><strong>{req.userNama}</strong><p className="text-slate-400">Bulan {req.bulanNama} {getTahunUntukBulan(req.bulanNama)} | Rp {req.nominal.toLocaleString('id-ID')} {req.buktiNamaFile ? `| File: ${req.buktiNamaFile}` : ''}</p></div>
                       <div className="flex gap-2">
                         <button onClick={() => setPreviewBukti({ ...req })} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded-lg">Lihat Bukti</button>
                         <button onClick={() => handleRejectPembayaran(req.userNama, req.bulanNama)} className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded-lg">Tolak</button>
@@ -5582,7 +5612,7 @@ export default function IuranWargaRTApp() {
               <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white px-6 pt-6 pb-4">
                 <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Bukti Transfer</p>
                 <h4 className="font-black text-base mt-1 pr-10">{previewBukti.userNama}</h4>
-                <p className="text-[11px] text-slate-400 mt-0.5">Iuran Bulan {previewBukti.bulanNama} {periodeTahun} • Rp {previewBukti.nominal.toLocaleString('id-ID')}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Iuran Bulan {previewBukti.bulanNama} {getTahunUntukBulan(previewBukti.bulanNama)} • Rp {previewBukti.nominal.toLocaleString('id-ID')}</p>
               </div>
 
               <div className="p-5 space-y-3 text-xs">
@@ -5646,7 +5676,7 @@ export default function IuranWargaRTApp() {
               <div className="space-y-2 text-xs">
                 <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Sudah diterima dari</span><strong>{selectedKuitansi.nama}</strong></div>
                 <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Nomor Rumah/Blok</span><strong className="text-emerald-800">{selectedKuitansi.nomorRumah || selectedKuitansi.nama}</strong></div>
-                <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Untuk pembayaran</span><strong>Iuran Warga Bln. {selectedKuitansi.bulan} {periodeTahun} (Angsuran Ke-{selectedKuitansi.angsuranKe})</strong></div>
+                <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Untuk pembayaran</span><strong>Iuran Warga Bln. {selectedKuitansi.bulan} {getTahunUntukBulan(selectedKuitansi.bulan)} (Angsuran Ke-{selectedKuitansi.angsuranKe})</strong></div>
                 <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Nominal</span><strong className="text-emerald-800">Rp {selectedKuitansi.nominal.toLocaleString('id-ID')}</strong></div>
                 <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Tanggal Pelunasan</span><strong>{pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).tanggal}</strong></div>
                 <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Jam Pelunasan</span><strong>{pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).jam}</strong></div>
@@ -5661,7 +5691,7 @@ export default function IuranWargaRTApp() {
                       decoding="async"
                       alt="QR Verifikasi Kuitansi"
                       className="w-full h-full object-contain"
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=0&data=${encodeURIComponent(`KWITANSI RESMI ${selectedKuitansi.noKuitansi}\n${cmsTeks.namaRT}\nDiterima dari: ${selectedKuitansi.nama}\nNomor Rumah/Blok: ${selectedKuitansi.nomorRumah || selectedKuitansi.nama}\nBulan: ${selectedKuitansi.bulan} ${periodeTahun}\nNominal: Rp ${selectedKuitansi.nominal.toLocaleString('id-ID')}\nTanggal Pelunasan: ${pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).tanggal}\nJam Pelunasan: ${pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).jam}\nStatus: LUNAS - Diverifikasi Bendahara RT ${getBendaharaRtNama()}`)}`}
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=0&data=${encodeURIComponent(`KWITANSI RESMI ${selectedKuitansi.noKuitansi}\n${cmsTeks.namaRT}\nDiterima dari: ${selectedKuitansi.nama}\nNomor Rumah/Blok: ${selectedKuitansi.nomorRumah || selectedKuitansi.nama}\nBulan: ${selectedKuitansi.bulan} ${getTahunUntukBulan(selectedKuitansi.bulan)}\nNominal: Rp ${selectedKuitansi.nominal.toLocaleString('id-ID')}\nTanggal Pelunasan: ${pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).tanggal}\nJam Pelunasan: ${pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).jam}\nStatus: LUNAS - Diverifikasi Bendahara RT ${getBendaharaRtNama()}`)}`}
                       onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }}
                     />
                   </div>
@@ -5703,7 +5733,7 @@ export default function IuranWargaRTApp() {
               <h4 className="font-black text-slate-900 text-sm mt-2">Mohon cek kembali sebelum kirim</h4>
             </div>
             <div className="bg-slate-50 border rounded-xl p-3 space-y-1.5 text-slate-600 font-semibold">
-              <p className="flex justify-between"><span className="text-slate-400">Bulan</span><span>{konfirmasiUploadBukti.bulanNama} {periodeTahun}</span></p>
+              <p className="flex justify-between"><span className="text-slate-400">Bulan</span><span>{konfirmasiUploadBukti.bulanNama} {getTahunUntukBulan(konfirmasiUploadBukti.bulanNama)}</span></p>
               <p className="flex justify-between"><span className="text-slate-400">Tanggal Transaksi</span><span>{formatTanggalIndo(konfirmasiUploadBukti.tanggalBayar)}</span></p>
               <p className="flex justify-between"><span className="text-slate-400">Nominal</span><span className="text-emerald-700">Rp {Number(konfirmasiUploadBukti.nominal).toLocaleString('id-ID')}</span></p>
               <p className="flex justify-between"><span className="text-slate-400">File</span><span className="truncate max-w-[160px]">{konfirmasiUploadBukti.file?.name}</span></p>
