@@ -237,7 +237,24 @@ export default function IuranWargaRTApp() {
       'Jadwal ronda malam bergilir sesuai jadwal yang dibagikan pengurus RT.',
       'Pembayaran iuran ditutup setiap tanggal 10, mohon tidak menunggu akhir bulan.'
     ],
-    asetRTList: ['Pos Ronda', 'Gapura Perumahan', 'Sound System', 'Tenda & Kursi Kegiatan Warga', 'Alat Kebersihan Lingkungan', 'Mobil Operasional RT']
+    asetRTList: ['Pos Ronda', 'Gapura Perumahan', 'Sound System', 'Tenda & Kursi Kegiatan Warga', 'Alat Kebersihan Lingkungan', 'Mobil Operasional RT'],
+    // ==========================================
+    // PILIHAN BLOK RUMAH & NOMOR RUMAH (dropdown Form Pendaftaran warga baru)
+    // -----------------------------------------------------------
+    // Sebelumnya daftar ini HARDCODE di kode (F1-F14, G1-G6 / nomor 1-25),
+    // jadi kalau nama blok RT berubah, admin harus minta programmer edit kode.
+    // Sekarang jadi bagian dari CMS Super Editor -> Admin bisa tambah/hapus/
+    // ubah sendiri, tersimpan ke sheet "Pengaturan" sama seperti Aset RT &
+    // Info Pengumuman, otomatis update di form pendaftaran untuk semua akun.
+    daftarBlokRumahList: [
+      ...Array.from({ length: 14 }, (_, i) => `F${i + 1}`),
+      ...Array.from({ length: 6 }, (_, i) => `G${i + 1}`),
+    ],
+    daftarNomorRumahList: [
+      ...Array.from({ length: 11 }, (_, i) => String(i + 1)),
+      '12A',
+      ...Array.from({ length: 12 }, (_, i) => String(i + 14)),
+    ],
   });
 
   const [cmsForm, setCmsForm] = useState({
@@ -860,6 +877,8 @@ export default function IuranWargaRTApp() {
           ketentuanList: settingsRow.ketentuanList ? String(settingsRow.ketentuanList).split('|').filter(Boolean) : prev.ketentuanList,
           asetRTList: settingsRow.asetRTList ? String(settingsRow.asetRTList).split('|').filter(Boolean) : prev.asetRTList,
           infoPengumumanList: settingsRow.infoPengumumanList ? String(settingsRow.infoPengumumanList).split('|').filter(Boolean) : prev.infoPengumumanList,
+          daftarBlokRumahList: settingsRow.daftarBlokRumahList ? String(settingsRow.daftarBlokRumahList).split('|').filter(Boolean) : prev.daftarBlokRumahList,
+          daftarNomorRumahList: settingsRow.daftarNomorRumahList ? String(settingsRow.daftarNomorRumahList).split('|').filter(Boolean) : prev.daftarNomorRumahList,
         }));
       }
       setSheetStatus('synced');
@@ -1090,18 +1109,12 @@ export default function IuranWargaRTApp() {
   // ==========================================
   // DAFTAR PILIHAN BLOK & NOMOR RUMAH (dipakai di dropdown Form Pendaftaran)
   // -----------------------------------------------------------
-  // Blok Rumah: F1 s/d F14, dan G1 s/d G6.
-  // Nomor Rumah: 1 s/d 11, lalu 12A (menggantikan nomor 13), lalu 14 s/d 25.
+  // Diambil dari cmsTeks.daftarBlokRumahList / daftarNomorRumahList supaya
+  // Admin bisa mengedit sendiri lewat CMS Super Editor (lihat panel "Pilihan
+  // Blok & Nomor Rumah"), bukan lagi hardcode F1-F14/G1-G6 di kode.
   // ==========================================
-  const DAFTAR_BLOK_RUMAH = [
-    ...Array.from({ length: 14 }, (_, i) => `F${i + 1}`),
-    ...Array.from({ length: 6 }, (_, i) => `G${i + 1}`),
-  ];
-  const DAFTAR_NOMOR_RUMAH = [
-    ...Array.from({ length: 11 }, (_, i) => String(i + 1)),
-    '12A',
-    ...Array.from({ length: 12 }, (_, i) => String(i + 14)),
-  ];
+  const DAFTAR_BLOK_RUMAH = (cmsTeks.daftarBlokRumahList && cmsTeks.daftarBlokRumahList.length) ? cmsTeks.daftarBlokRumahList : ['F1'];
+  const DAFTAR_NOMOR_RUMAH = (cmsTeks.daftarNomorRumahList && cmsTeks.daftarNomorRumahList.length) ? cmsTeks.daftarNomorRumahList : ['1'];
 
   // ==========================================
   // USIA OTOMATIS & KATEGORI USIA (ANGGOTA KELUARGA)
@@ -1534,6 +1547,8 @@ export default function IuranWargaRTApp() {
       luasRT: cmsForm.luasRT,
       infoPengumumanList: cmsForm.infoPengumumanList,
       asetRTList: cmsForm.asetRTList,
+      daftarBlokRumahList: cmsForm.daftarBlokRumahList,
+      daftarNomorRumahList: cmsForm.daftarNomorRumahList,
     };
     setCmsTeks(teksBaru);
     // Simpan URL Apps Script ke localStorage browser ini, supaya saat app dibuka
@@ -1552,6 +1567,8 @@ export default function IuranWargaRTApp() {
         ketentuanList: teksBaru.ketentuanList.join('|'),
         asetRTList: (teksBaru.asetRTList || []).join('|'),
         infoPengumumanList: (teksBaru.infoPengumumanList || []).join('|'),
+        daftarBlokRumahList: (teksBaru.daftarBlokRumahList || []).join('|'),
+        daftarNomorRumahList: (teksBaru.daftarNomorRumahList || []).join('|'),
       }]);
     }
     showToast('Seluruh konten website berhasil disimpan & langsung tersinkron ke semua akun warga!');
@@ -1670,6 +1687,43 @@ export default function IuranWargaRTApp() {
   };
   const handleHapusPengumuman = (idx) => {
     setCmsForm(prev => ({ ...prev, infoPengumumanList: (prev.infoPengumumanList || []).filter((_, i) => i !== idx) }));
+  };
+
+  // KELOLA PILIHAN BLOK RUMAH (dropdown Form Pendaftaran) - tambah/hapus
+  // sendiri oleh Admin lewat CMS Super Editor, menggantikan daftar F1-F14/
+  // G1-G6 yang sebelumnya hardcode di kode.
+  const [inputBlokRumahBaru, setInputBlokRumahBaru] = useState('');
+  const handleTambahBlokRumah = (e) => {
+    e.preventDefault();
+    const nilaiBaru = inputBlokRumahBaru.trim();
+    if (!nilaiBaru) return;
+    if ((cmsForm.daftarBlokRumahList || []).includes(nilaiBaru)) {
+      showToast('Blok tersebut sudah ada di daftar.', 'error');
+      return;
+    }
+    setCmsForm(prev => ({ ...prev, daftarBlokRumahList: [...(prev.daftarBlokRumahList || []), nilaiBaru] }));
+    setInputBlokRumahBaru('');
+  };
+  const handleHapusBlokRumah = (idx) => {
+    setCmsForm(prev => ({ ...prev, daftarBlokRumahList: (prev.daftarBlokRumahList || []).filter((_, i) => i !== idx) }));
+  };
+
+  // KELOLA PILIHAN NOMOR RUMAH (dropdown Form Pendaftaran) - tambah/hapus
+  // sendiri oleh Admin lewat CMS Super Editor.
+  const [inputNomorRumahBaru, setInputNomorRumahBaru] = useState('');
+  const handleTambahNomorRumah = (e) => {
+    e.preventDefault();
+    const nilaiBaru = inputNomorRumahBaru.trim();
+    if (!nilaiBaru) return;
+    if ((cmsForm.daftarNomorRumahList || []).includes(nilaiBaru)) {
+      showToast('Nomor tersebut sudah ada di daftar.', 'error');
+      return;
+    }
+    setCmsForm(prev => ({ ...prev, daftarNomorRumahList: [...(prev.daftarNomorRumahList || []), nilaiBaru] }));
+    setInputNomorRumahBaru('');
+  };
+  const handleHapusNomorRumah = (idx) => {
+    setCmsForm(prev => ({ ...prev, daftarNomorRumahList: (prev.daftarNomorRumahList || []).filter((_, i) => i !== idx) }));
   };
 
   // KELOLA RIWAYAT KAS MASUK/KELUAR (buku kas) - tambah/edit/hapus baris
@@ -1800,6 +1854,8 @@ export default function IuranWargaRTApp() {
         ketentuanList: teksBaru.ketentuanList.join('|'),
         asetRTList: (teksBaru.asetRTList || []).join('|'),
         infoPengumumanList: (teksBaru.infoPengumumanList || []).join('|'),
+        daftarBlokRumahList: (teksBaru.daftarBlokRumahList || []).join('|'),
+        daftarNomorRumahList: (teksBaru.daftarNomorRumahList || []).join('|'),
       }]);
     }
     showToast('Logo RT berhasil diperbarui & langsung tampil untuk semua akun.');
@@ -5192,6 +5248,52 @@ export default function IuranWargaRTApp() {
                             <input type="text" placeholder="mis. Sound System" value={inputAsetBaru} onChange={(e) => setInputAsetBaru(e.target.value)} className="flex-1 border p-2 rounded-xl bg-slate-50" />
                             <button type="button" onClick={handleTambahAsetRT} className="bg-slate-200 text-slate-700 font-bold px-3 rounded-xl text-[11px]">+ Tambah</button>
                           </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* PILIHAN BLOK RUMAH & NOMOR RUMAH (dropdown Form Pendaftaran warga
+                      baru) - dulu hardcode F1-F14/G1-G6 & nomor 1-25 di kode, sekarang
+                      bisa diedit bebas oleh Admin di sini (tambah/hapus), otomatis
+                      langsung dipakai di form pendaftaran untuk semua pengunjung.
+                      CATATAN: ini BEDA dengan menu "Kelola Blok / Kelompok" (Rekap Blok
+                      Rumah) yang mengatur pengelompokan warga untuk iuran - daftar di
+                      sini hanya untuk pilihan Blok & Nomor di form pendaftaran. */}
+                  <div className="border-t pt-4">
+                    <h4 className="text-slate-900 font-black text-xs mb-1">Pilihan Blok Rumah &amp; Nomor Rumah (Form Pendaftaran)</h4>
+                    <p className="text-[10px] text-slate-400 mb-3">Daftar pilihan yang muncul di dropdown "Blok Rumah" &amp; "Nomor Rumah" saat warga baru mendaftar. Tambah, hapus, atau sesuaikan sendiri sesuai kondisi RT Anda - tidak perlu edit kode lagi.</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-slate-600 mb-1">Daftar Blok Rumah</label>
+                        <div className="space-y-1 mb-2 max-h-28 overflow-y-auto">
+                          {(cmsForm.daftarBlokRumahList || []).map((b, i) => (
+                            <div key={i} className="flex items-center justify-between bg-slate-50 border rounded-lg px-2 py-1">
+                              <span className="truncate">{b}</span>
+                              <button type="button" onClick={() => handleHapusBlokRumah(i)} className="text-rose-600 font-bold text-[10px] shrink-0 ml-2">Hapus</button>
+                            </div>
+                          ))}
+                          {(!cmsForm.daftarBlokRumahList || cmsForm.daftarBlokRumahList.length === 0) && <p className="text-slate-400 italic text-[10px]">Belum ada pilihan blok.</p>}
+                        </div>
+                        <div className="flex gap-2">
+                          <input type="text" placeholder="mis. F15 / Blok H1" value={inputBlokRumahBaru} onChange={(e) => setInputBlokRumahBaru(e.target.value)} className="flex-1 border p-2 rounded-xl bg-slate-50" />
+                          <button type="button" onClick={handleTambahBlokRumah} className="bg-slate-200 text-slate-700 font-bold px-3 rounded-xl text-[11px]">+ Tambah</button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-slate-600 mb-1">Daftar Nomor Rumah</label>
+                        <div className="space-y-1 mb-2 max-h-28 overflow-y-auto">
+                          {(cmsForm.daftarNomorRumahList || []).map((n, i) => (
+                            <div key={i} className="flex items-center justify-between bg-slate-50 border rounded-lg px-2 py-1">
+                              <span className="truncate">{n}</span>
+                              <button type="button" onClick={() => handleHapusNomorRumah(i)} className="text-rose-600 font-bold text-[10px] shrink-0 ml-2">Hapus</button>
+                            </div>
+                          ))}
+                          {(!cmsForm.daftarNomorRumahList || cmsForm.daftarNomorRumahList.length === 0) && <p className="text-slate-400 italic text-[10px]">Belum ada pilihan nomor.</p>}
+                        </div>
+                        <div className="flex gap-2">
+                          <input type="text" placeholder="mis. 26 / 12B" value={inputNomorRumahBaru} onChange={(e) => setInputNomorRumahBaru(e.target.value)} className="flex-1 border p-2 rounded-xl bg-slate-50" />
+                          <button type="button" onClick={handleTambahNomorRumah} className="bg-slate-200 text-slate-700 font-bold px-3 rounded-xl text-[11px]">+ Tambah</button>
                         </div>
                       </div>
                     </div>
