@@ -327,6 +327,7 @@ export default function IuranWargaRTApp() {
     { id: 'RB-02', tanggal: '10 Jun 2026', kategori: 'Kebersihan', keterangan: 'Sewa mobil pick-up angkut sampah lingkungan', nominal: 350000, kelompok: 'Semua', buktiUrl: null, buktiNamaFile: 'nota_sewa.jpg', dicatatOleh: 'Ahmad (Bendahara)' },
   ]);
   const [formRealisasiBaru, setFormRealisasiBaru] = useState({ tanggal: '', kategori: 'Kebersihan', keterangan: '', nominal: '', kelompok: 'Semua', buktiUrl: null, buktiNamaFile: null });
+  const [editingRealisasiId, setEditingRealisasiId] = useState(null); // id baris Realisasi Belanja yang sedang diedit admin (null = mode tambah baru)
   const [previewLampiran, setPreviewLampiran] = useState(null); // { judul, url, namaFile, tipe: 'gambar'|'pdf' }
 
   // DATA DUMMY TETAP (statis) khusus tampilan simulasi di Web Utama - TIDAK PERNAH
@@ -348,13 +349,33 @@ export default function IuranWargaRTApp() {
   // ==========================================
   const [isSimulatedSession, setIsSimulatedSession] = useState(true);
 
-  // CONSTANT KALENDER 2026
-  const DAFTAR_BULAN = [
-    { id: 1, nama: 'Januari' }, { id: 2, nama: 'Februari' }, { id: 3, nama: 'Maret' },
-    { id: 4, nama: 'April' }, { id: 5, nama: 'Mei' }, { id: 6, nama: 'Juni' },
-    { id: 7, nama: 'Juli' }, { id: 8, nama: 'Agustus' }, { id: 9, nama: 'September' },
-    { id: 10, nama: 'Oktober' }, { id: 11, nama: 'November' }, { id: 12, nama: 'Desember' }
-  ];
+  // ==========================================
+  // BULAN MULAI PERIODE (DISETTING ADMIN, TIDAK HARUS JANUARI)
+  // -----------------------------------------------------------
+  // Admin bisa mengatur tanggal mulai periode iuran lewat menu
+  // "Manajemen Periode" (contoh: mulai Juli 2026 -> siklus 12 bulan
+  // jadi Juli 2026 s/d Juni 2027, bukan wajib Jan-Des). Nilai ini
+  // (1-12, 1=Januari) dipakai untuk menyusun urutan 12 bulan berjalan
+  // di bawah (DAFTAR_BULAN) sehingga SELURUH akun (admin & warga)
+  // otomatis mengikuti periode yang sama tanpa perlu diubah manual
+  // satu per satu.
+  // ==========================================
+  const [periodeBulanMulai, setPeriodeBulanMulai] = useState(7); // default: Juli (mengikuti periode berjalan saat ini)
+
+  // CONSTANT NAMA BULAN KALENDER (URUTAN TETAP JAN-DES, DIPAKAI UNTUK MENYUSUN DAFTAR_BULAN DI BAWAH)
+  const NAMA_BULAN_KALENDER = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+  // DAFTAR_BULAN: 12 bulan BERJALAN sesuai periode yang diset admin (bukan selalu Jan-Des).
+  // id 1-12 = urutan angsuran ke- dalam periode (dipertahankan supaya seluruh
+  // kode lain yang sudah memakai bln.id / bln.nama tetap berjalan seperti biasa).
+  // tahunOffset = 0 untuk bulan yang masih di tahun awal periode, 1 untuk bulan
+  // yang sudah masuk tahun berikutnya (dipakai saat periode "menyeberang" tahun,
+  // misal Juli 2026 - Juni 2027).
+  const DAFTAR_BULAN = Array.from({ length: 12 }, (_, i) => {
+    const bulanKalender = ((periodeBulanMulai - 1 + i) % 12) + 1;
+    const tahunOffset = periodeBulanMulai - 1 + i >= 12 ? 1 : 0;
+    return { id: i + 1, nama: NAMA_BULAN_KALENDER[bulanKalender - 1], bulanKalender, tahunOffset };
+  });
 
   // ==========================================
   // DATA SIMULASI TAMBAHAN: BLOK F1-F14 & G1-G6 (CONTOH/DUMMY)
@@ -767,28 +788,40 @@ export default function IuranWargaRTApp() {
     if (sunyi && pendingSyncCountRef.current > 0) return;
     setSheetStatus('loading');
     try {
+      // PERBAIKAN PENTING: SEMUA fetch di bawah sekarang punya .catch() masing-
+      // masing. SEBELUMNYA sebagian besar (termasuk getStrukturRT) TIDAK punya
+      // .catch() -> kalau SATU SAJA sheet gagal diambil (mis. header sel
+      // kosong/berubah, atau baris data yang bikin error saat dibaca Apps
+      // Script), Promise.all LANGSUNG GAGAL TOTAL dan SEMUA data lain (Anggota,
+      // Iuran, Struktur RT, dst) ikut GAGAL dimuat - padahal cuma satu sheet
+      // yang sebenarnya bermasalah. Inilah kemungkinan besar penyebab "Struktur
+      // Pengurus RT tidak konek ke GSheet": begitu salah satu sheet lain gagal,
+      // foto/nama pengurus RT ikut gagal ter-update walau data di tab
+      // StrukturRT sendiri sudah benar. Sekarang tiap sheet gagal SENDIRI-
+      // SENDIRI (tidak saling menjatuhkan) dan errornya dicatat di console
+      // supaya gampang dilacak kalau terulang.
       const [
         dataAnggota, dataIuran, dataKegiatan, dataKelompok,
         dataPengajuan, dataStruktur, dataPengaturan, dataPeriode, dataRiwayatPeriode,
         dataRiwayatKasRt, dataRealisasi, dataAgendaUtama, dataNotifikasi, dataWargaKeluar, dataTunggakan
       ] = await Promise.all([
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getMembers`),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getIuran`),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getKegiatan`),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getKelompok`),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getPengajuan`),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getStrukturRT`),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getPengaturan`),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getPeriode`),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRiwayatPeriode`),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRiwayatKasRt`).catch(() => []),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRealisasiBelanja`),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getAgendaUtama`),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getNotifikasi`).catch(() => []),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getWargaKeluar`).catch(() => []),
-        // Sheet "Tunggakan" mungkin belum ada di Apps Script versi lama -> .catch(() => [])
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getMembers`).catch((err) => { console.error('getMembers gagal:', err); return []; }),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getIuran`).catch((err) => { console.error('getIuran gagal:', err); return []; }),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getKegiatan`).catch((err) => { console.error('getKegiatan gagal:', err); return []; }),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getKelompok`).catch((err) => { console.error('getKelompok gagal:', err); return []; }),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getPengajuan`).catch((err) => { console.error('getPengajuan gagal:', err); return []; }),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getStrukturRT`).catch((err) => { console.error('getStrukturRT gagal:', err); return []; }),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getPengaturan`).catch((err) => { console.error('getPengaturan gagal:', err); return []; }),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getPeriode`).catch((err) => { console.error('getPeriode gagal:', err); return []; }),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRiwayatPeriode`).catch((err) => { console.error('getRiwayatPeriode gagal:', err); return []; }),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRiwayatKasRt`).catch((err) => { console.error('getRiwayatKasRt gagal:', err); return []; }),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRealisasiBelanja`).catch((err) => { console.error('getRealisasiBelanja gagal:', err); return []; }),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getAgendaUtama`).catch((err) => { console.error('getAgendaUtama gagal:', err); return []; }),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getNotifikasi`).catch((err) => { console.error('getNotifikasi gagal:', err); return []; }),
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getWargaKeluar`).catch((err) => { console.error('getWargaKeluar gagal:', err); return []; }),
+        // Sheet "Tunggakan" mungkin belum ada di Apps Script versi lama -> .catch()
         // supaya tidak menggagalkan pemuatan data lain (backward compatible).
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getTunggakan`).catch(() => [])
+        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getTunggakan`).catch((err) => { console.error('getTunggakan gagal:', err); return []; })
       ]);
       if (Array.isArray(dataAnggota) && dataAnggota.length) {
         setMembers(dataAnggota.map(m => ({ ...m, target: Number(m.target) || 0, anggotaKeluarga: parseAnggotaKeluarga(m.anggotaKeluarga) })));
@@ -962,9 +995,38 @@ export default function IuranWargaRTApp() {
   const [periodeAktif, setPeriodeAktif] = useState({ noPeriode: '001/VII/2026', tahun: 2026, status: 'Berjalan', tanggalMulai: '11 Jul 2026' });
   const [riwayatPeriode, setRiwayatPeriode] = useState([]);
 
+  // Form admin untuk mengatur TANGGAL MULAI periode iuran (menu Manajemen
+  // Periode). Admin cukup isi 1 tanggal (mis. 01-07-2026 untuk "Juli 2026"),
+  // lalu sistem otomatis menyusun siklus 12 bulan berjalan mulai dari bulan
+  // tersebut (Juli 2026 - Juni 2027) untuk SEMUA akun, tidak wajib Jan-Des.
+  const [formPengaturanPeriode, setFormPengaturanPeriode] = useState({ tanggalMulai: '2026-07-01' });
+
   const romawiBulan = (bulan) => ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII'][bulan - 1] || 'I';
   const buatNomorPeriode = (urut, tahun, bulan) => `${String(urut).padStart(3, '0')}/${romawiBulan(bulan)}/${tahun}`;
   const BULAN_BERJALAN = 7; // Juli 2026 (mengikuti tanggal simulasi aplikasi)
+
+  // Label rentang periode berjalan, contoh: "Juli 2026 - Juni 2027" (otomatis
+  // mengikuti tahunOffset kalau periode menyeberang tahun kalender).
+  const labelRentangPeriode = `${DAFTAR_BULAN[0].nama} ${periodeTahun} - ${DAFTAR_BULAN[11].nama} ${periodeTahun + DAFTAR_BULAN[11].tahunOffset}`;
+
+  // Simpan pengaturan tanggal mulai periode baru dari form admin.
+  const handleSimpanPengaturanPeriode = (e) => {
+    e.preventDefault();
+    if (!formPengaturanPeriode.tanggalMulai) {
+      showToast('Isi dulu tanggal mulai periode.', 'error');
+      return;
+    }
+    const [y, m, d] = formPengaturanPeriode.tanggalMulai.split('-').map(Number);
+    if (!y || !m || !d) {
+      showToast('Format tanggal tidak valid.', 'error');
+      return;
+    }
+    setPeriodeBulanMulai(m);
+    setPeriodeTahun(y);
+    const noPeriodeBaru = buatNomorPeriode(nomorUrutPeriode, y, m);
+    updatePeriode({ noPeriode: noPeriodeBaru, tahun: y, status: 'Berjalan', tanggalMulai: formatTanggalIndo(formPengaturanPeriode.tanggalMulai) });
+    showToast(`Periode berjalan diset mulai ${formatTanggalIndo(formPengaturanPeriode.tanggalMulai)}. Siklus 12 bulan otomatis mengikuti dari bulan ini untuk seluruh akun.`);
+  };
 
   // ==========================================
   // MANAJEMEN BLOK RUMAH (PENGELOMPOKAN WILAYAH RT)
@@ -1109,6 +1171,10 @@ export default function IuranWargaRTApp() {
   // kategori usia per Blok Rumah yang dilihat admin.
   // ==========================================
   const [formTambahAnggotaUser, setFormTambahAnggotaUser] = useState({ nama: '', hubungan: 'Suami', jenisKelamin: 'Perempuan', tanggalLahir: '' });
+  // id anggota keluarga yang sedang diedit warga (null = mode tambah baru).
+  // Sengaja disimpan terpisah dari editingWargaKeluarId (fitur admin lain)
+  // supaya tidak bentrok.
+  const [editingAnggotaKeluargaId, setEditingAnggotaKeluargaId] = useState(null);
   const handleTambahAnggotaKeluargaUser = (e) => {
     e.preventDefault();
     if (isSimulatedSession) {
@@ -1119,12 +1185,43 @@ export default function IuranWargaRTApp() {
       showToast('Nama dan tanggal lahir anggota keluarga wajib diisi.', 'error');
       return;
     }
+    if (editingAnggotaKeluargaId) {
+      // MODE EDIT: perbarui data anggota keluarga yang sudah ada (langsung
+      // ikut tersimpan di data induk `members`, sehingga admin otomatis
+      // melihat data terbaru tanpa langkah tambahan).
+      const daftarBaru = (activeUserSession.anggotaKeluarga || []).map(a => a.id === editingAnggotaKeluargaId ? {
+        ...a,
+        nama: formTambahAnggotaUser.nama.trim(),
+        hubungan: formTambahAnggotaUser.hubungan,
+        jenisKelamin: formTambahAnggotaUser.jenisKelamin,
+        tanggalLahir: formTambahAnggotaUser.tanggalLahir,
+      } : a);
+      updateMembers(members.map(m => m.id === activeUserSession.id ? { ...m, anggotaKeluarga: daftarBaru } : m));
+      setActiveUserSession(prev => ({ ...prev, anggotaKeluarga: daftarBaru }));
+      setEditingAnggotaKeluargaId(null);
+      setFormTambahAnggotaUser({ nama: '', hubungan: 'Suami', jenisKelamin: 'Perempuan', tanggalLahir: '' });
+      showToast('Data anggota keluarga berhasil diperbarui.');
+      return;
+    }
     const anggotaBaru = { id: 'AK-' + Date.now(), nama: formTambahAnggotaUser.nama.trim(), hubungan: formTambahAnggotaUser.hubungan, jenisKelamin: formTambahAnggotaUser.jenisKelamin, tanggalLahir: formTambahAnggotaUser.tanggalLahir };
     const daftarBaru = [...(activeUserSession.anggotaKeluarga || []), anggotaBaru];
     updateMembers(members.map(m => m.id === activeUserSession.id ? { ...m, anggotaKeluarga: daftarBaru } : m));
     setActiveUserSession(prev => ({ ...prev, anggotaKeluarga: daftarBaru }));
     setFormTambahAnggotaUser({ nama: '', hubungan: 'Suami', jenisKelamin: 'Perempuan', tanggalLahir: '' });
     showToast('Anggota keluarga berhasil ditambahkan.');
+  };
+  // Mulai mode edit: isi ulang form dengan data anggota keluarga terpilih.
+  const handleMulaiEditAnggotaKeluargaUser = (a) => {
+    if (isSimulatedSession) {
+      showToast('Ini tampilan simulasi. Login dengan akun resmi untuk mengelola anggota keluarga.', 'error');
+      return;
+    }
+    setEditingAnggotaKeluargaId(a.id);
+    setFormTambahAnggotaUser({ nama: a.nama, hubungan: a.hubungan, jenisKelamin: a.jenisKelamin, tanggalLahir: a.tanggalLahir });
+  };
+  const handleBatalEditAnggotaKeluargaUser = () => {
+    setEditingAnggotaKeluargaId(null);
+    setFormTambahAnggotaUser({ nama: '', hubungan: 'Suami', jenisKelamin: 'Perempuan', tanggalLahir: '' });
   };
   const handleHapusAnggotaKeluargaUser = (id) => {
     if (isSimulatedSession) {
@@ -1134,6 +1231,7 @@ export default function IuranWargaRTApp() {
     const daftarBaru = (activeUserSession.anggotaKeluarga || []).filter(a => a.id !== id);
     updateMembers(members.map(m => m.id === activeUserSession.id ? { ...m, anggotaKeluarga: daftarBaru } : m));
     setActiveUserSession(prev => ({ ...prev, anggotaKeluarga: daftarBaru }));
+    if (editingAnggotaKeluargaId === id) handleBatalEditAnggotaKeluargaUser();
     showToast('Anggota keluarga berhasil dihapus.', 'error');
   };
 
@@ -1623,6 +1721,23 @@ export default function IuranWargaRTApp() {
       showToast('Keterangan dan nominal realisasi belanja wajib diisi.', 'error');
       return;
     }
+    if (editingRealisasiId) {
+      // MODE EDIT: simpan perubahan pada baris realisasi yang sudah ada (bukan menambah baris baru)
+      updateRealisasiBelanja(prev => prev.map(r => r.id === editingRealisasiId ? {
+        ...r,
+        tanggal: formRealisasiBaru.tanggal ? formatTanggalIndo(formRealisasiBaru.tanggal) : r.tanggal,
+        kategori: formRealisasiBaru.kategori,
+        keterangan: formRealisasiBaru.keterangan.trim(),
+        nominal: Number(formRealisasiBaru.nominal) || 0,
+        kelompok: formRealisasiBaru.kelompok,
+        buktiUrl: formRealisasiBaru.buktiUrl,
+        buktiNamaFile: formRealisasiBaru.buktiNamaFile,
+      } : r));
+      showToast('Perubahan data realisasi belanja berhasil disimpan.');
+      setEditingRealisasiId(null);
+      setFormRealisasiBaru({ tanggal: '', kategori: 'Kebersihan', keterangan: '', nominal: '', kelompok: 'Semua', buktiUrl: null, buktiNamaFile: null });
+      return;
+    }
     updateRealisasiBelanja(prev => [...prev, {
       id: 'RB-' + Date.now(),
       tanggal: formRealisasiBaru.tanggal ? formatTanggalIndo(formRealisasiBaru.tanggal) : '11 Jul 2026',
@@ -1640,7 +1755,28 @@ export default function IuranWargaRTApp() {
 
   const handleHapusRealisasiBelanja = (id) => {
     updateRealisasiBelanja(prev => prev.filter(r => r.id !== id));
+    if (editingRealisasiId === id) handleBatalEditRealisasiBelanja();
     showToast('Data realisasi belanja dihapus.', 'error');
+  };
+
+  // Mulai mode edit satu baris realisasi belanja: isi ulang form dengan data baris terpilih.
+  const handleEditRealisasiBelanja = (r) => {
+    setEditingRealisasiId(r.id);
+    setFormRealisasiBaru({
+      tanggal: '', // tanggal dibiarkan kosong (opsional diisi ulang); kalau tidak diisi, tanggal lama tetap dipakai
+      kategori: r.kategori,
+      keterangan: r.keterangan,
+      nominal: String(r.nominal),
+      kelompok: r.kelompok || 'Semua',
+      buktiUrl: r.buktiUrl || null,
+      buktiNamaFile: r.buktiNamaFile || null,
+    });
+    showToast(`Mode edit aktif untuk data: "${r.keterangan}". Ubah field yang perlu lalu simpan.`, 'sukses');
+  };
+
+  const handleBatalEditRealisasiBelanja = () => {
+    setEditingRealisasiId(null);
+    setFormRealisasiBaru({ tanggal: '', kategori: 'Kebersihan', keterangan: '', nominal: '', kelompok: 'Semua', buktiUrl: null, buktiNamaFile: null });
   };
 
   // UPLOAD LOGO CEPAT LANGSUNG DARI HEADER DASHBOARD (khusus Admin, tanpa perlu
@@ -1762,6 +1898,22 @@ export default function IuranWargaRTApp() {
 
   const handleToggleStatusKelompok = (id) => {
     updateKelompok(kelompokList.map(k => k.id === id ? { ...k, status: k.status === 'Progress' ? 'Closed' : 'Progress' } : k));
+  };
+
+  // Hapus 1 blok/kelompok dari daftar (mis. blok lama/tidak relevan seperti
+  // sisa contoh "Kelompok Sapi A/B/C" dari data awal). Kalau masih ada warga
+  // yang terdaftar di blok tsb, admin diminta memindahkan warganya dulu lewat
+  // "Panel Kontrol Anggota" supaya tidak ada warga yang jadi "nyangkut" tanpa blok.
+  const handleHapusKelompok = (k) => {
+    const jumlahWargaDiBlok = members.filter(m => m.kelompok === k.nama).length;
+    if (jumlahWargaDiBlok > 0) {
+      showToast(`Tidak bisa menghapus "${k.nama}" karena masih ada ${jumlahWargaDiBlok} warga terdaftar di blok ini. Pindahkan warganya dulu lewat Panel Kontrol Anggota.`, 'error');
+      return;
+    }
+    if (!window.confirm(`Hapus blok/kelompok "${k.nama}"? Tindakan ini tidak bisa dibatalkan.`)) return;
+    updateKelompok(kelompokList.filter(x => x.id !== k.id));
+    if (editingKelompokId === k.id) handleBatalEditKelompok();
+    showToast(`Blok/kelompok "${k.nama}" berhasil dihapus.`, 'error');
   };
 
   // ==========================================
@@ -1995,6 +2147,41 @@ export default function IuranWargaRTApp() {
 
   const toggleStatusAnggota = (id) => {
     updateMembers(members.map(m => m.id === id ? { ...m, statusAnggota: m.statusAnggota === 'Aktif' ? 'Pasif' : 'Aktif' } : m));
+  };
+
+  // ==========================================
+  // HAPUS WARGA BERSTATUS PASIF (ADMIN)
+  // -----------------------------------------------------------
+  // Untuk menjaga data tidak terhapus tidak sengaja, admin HANYA bisa
+  // menghapus permanen akun yang statusnya sudah "Pasif" (bukan Aktif).
+  // Warga yang masih Aktif harus di-nonaktifkan (toggleStatusAnggota)
+  // dulu sebelum bisa dihapus.
+  // ==========================================
+  const handleHapusMemberPasif = (member) => {
+    if (member.statusAnggota !== 'Pasif') {
+      showToast('Hanya warga berstatus Pasif yang bisa dihapus. Nonaktifkan dulu status warga ini.', 'error');
+      return;
+    }
+    const ok = window.confirm(`Hapus PERMANEN akun "${member.nama}" (${member.nomorRumah || '-'})?\n\nSeluruh data profil warga ini (bukan riwayat iuran/kuitansi yang sudah tercatat) akan dihapus dan tidak bisa dikembalikan.`);
+    if (!ok) return;
+    updateMembers(members.filter(m => m.id !== member.id));
+    setSelectedMemberIds(prev => prev.filter(id => id !== member.id));
+    showToast(`Akun warga "${member.nama}" (Pasif) berhasil dihapus permanen.`, 'error');
+  };
+
+  // Hapus massal seluruh warga Pasif yang sedang tercentang admin.
+  const handleHapusMemberPasifMassal = (idsTarget) => {
+    const targetPasif = members.filter(m => idsTarget.includes(m.id) && m.statusAnggota === 'Pasif');
+    if (targetPasif.length === 0) {
+      showToast('Tidak ada warga berstatus Pasif pada centang saat ini. Hanya warga Pasif yang bisa dihapus.', 'error');
+      return;
+    }
+    const ok = window.confirm(`Hapus PERMANEN ${targetPasif.length} akun warga berstatus Pasif yang dipilih?\n\nTindakan ini tidak bisa dibatalkan.`);
+    if (!ok) return;
+    const idPasif = new Set(targetPasif.map(m => m.id));
+    updateMembers(members.filter(m => !idPasif.has(m.id)));
+    setSelectedMemberIds(prev => prev.filter(id => !idPasif.has(id)));
+    showToast(`${targetPasif.length} akun warga Pasif berhasil dihapus permanen.`, 'error');
   };
 
   // ==========================================
@@ -2517,10 +2704,15 @@ export default function IuranWargaRTApp() {
 
     const urutBaru = nomorUrutPeriode + 1;
     const tahunBaru = periodeTahun + 1;
-    const noPeriodeBaru = buatNomorPeriode(urutBaru, tahunBaru, 1);
+    const noPeriodeBaru = buatNomorPeriode(urutBaru, tahunBaru, periodeBulanMulai);
     setNomorUrutPeriode(urutBaru);
     setPeriodeTahun(tahunBaru);
-    updatePeriode({ noPeriode: noPeriodeBaru, tahun: tahunBaru, status: 'Berjalan', tanggalMulai: `01 Jan ${tahunBaru}` });
+    // Periode baru otomatis lanjut mulai dari bulan yang sama dengan pengaturan
+    // admin sebelumnya (contoh: kalau periode berjalan mulai Juli, periode
+    // berikutnya juga otomatis mulai Juli tahun depan). Admin tetap bisa
+    // mengubah tanggal mulai ini kapan saja lewat form "Atur Tanggal Mulai
+    // Periode" di menu Manajemen Periode.
+    updatePeriode({ noPeriode: noPeriodeBaru, tahun: tahunBaru, status: 'Berjalan', tanggalMulai: `01 ${DAFTAR_BULAN[0].nama} ${tahunBaru}` });
     updateIuran([]);
     updateKegiatan([]);
     showToast(`Periode ${arsip.noPeriode} ditutup & diarsipkan. Periode baru ${noPeriodeBaru} resmi dibuka.${calonTunggakan.length > 0 ? ` ${calonTunggakan.length} tagihan belum lunas dipindahkan jadi tunggakan.` : ''}`);
@@ -3247,7 +3439,16 @@ export default function IuranWargaRTApp() {
               const jmlLakiTanggungan = dataWarga.reduce((acc, m) => acc + (m.anggotaKeluarga || []).filter(a => a.jenisKelamin === 'Laki-laki').length, 0);
               const rekapUsiaRT = getRekapKategoriUsia(dataWarga);
               const totalUsiaTerdata = Object.values(rekapUsiaRT).reduce((a, b) => a + b, 0);
-              const perBlok = kelompokList.map(k => ({ ...k, jumlahKK: members.filter(m => m.kelompok === k.nama).length }));
+              // REKAP WARGA PER BLOK - jumlah KK & jumlah jiwa (KK + seluruh anggota
+              // keluarga yang tercatat) per blok. Admin melihat SEMUA blok, akun
+              // user (warga) hanya melihat blok tempat tinggalnya sendiri saja.
+              const perBlokSemua = kelompokList.map(k => {
+                const anggotaBlokIni = members.filter(m => m.kelompok === k.nama);
+                const jumlahKK = anggotaBlokIni.length;
+                const jumlahJiwa = jumlahKK + anggotaBlokIni.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
+                return { ...k, jumlahKK, jumlahJiwa };
+              });
+              const perBlok = role === 'admin' ? perBlokSemua : perBlokSemua.filter(k => k.nama === activeUserSession.kelompok);
               const wargaTerbaru = dataWarga.slice(-5).reverse();
               // Warga Keluar: Admin lihat semua blok, akun user (warga) hanya
               // lihat warga keluar dari bloknya sendiri - otomatis konek dengan
@@ -3334,29 +3535,37 @@ export default function IuranWargaRTApp() {
                     </div>
                   </div>
 
-                  {/* DISTRIBUSI PER BLOK (KHUSUS ADMIN) */}
-                  {role === 'admin' && (
-                    <div className="bg-white p-5 rounded-2xl border shadow-xs">
-                      <h4 className="text-xs font-extrabold text-slate-900 uppercase mb-3">Distribusi Warga per Blok</h4>
-                      <div className="space-y-2">
-                        {perBlok.map(k => {
-                          const persen = totalKK > 0 ? Math.round((k.jumlahKK / totalKK) * 100) : 0;
-                          return (
-                            <div key={k.id} className="text-[11px] font-semibold">
-                              <div className="flex justify-between mb-1">
-                                <span className="text-slate-600">{k.nama} <span className="text-slate-400 font-normal">({k.jenis})</span></span>
-                                <span className="text-slate-900 font-black">{k.jumlahKK} KK</span>
-                              </div>
+                  {/* DISTRIBUSI/REKAP WARGA PER BLOK - jumlah KK & jumlah jiwa.
+                      Admin melihat semua blok, akun user (warga) hanya melihat
+                      blok tempat tinggalnya sendiri, otomatis terhubung dengan
+                      data Anggota (Google Sheet) tanpa perlu input manual. */}
+                  <div className="bg-white p-5 rounded-2xl border shadow-xs">
+                    <h4 className="text-xs font-extrabold text-slate-900 uppercase mb-3">
+                      {role === 'admin' ? 'Distribusi Warga per Blok' : `Informasi Warga Blok ${activeUserSession.kelompok}`}
+                    </h4>
+                    <div className="space-y-3">
+                      {perBlok.map(k => {
+                        const persen = totalKK > 0 ? Math.round((k.jumlahKK / totalKK) * 100) : 0;
+                        return (
+                          <div key={k.id} className="text-[11px] font-semibold">
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="text-slate-600">{k.nama} <span className="text-slate-400 font-normal">({k.jenis})</span></span>
+                              <span className="flex items-center gap-2">
+                                <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-lg font-black">{k.jumlahKK} KK</span>
+                                <span className="bg-sky-50 text-sky-700 px-2 py-0.5 rounded-lg font-black">{k.jumlahJiwa} Jiwa</span>
+                              </span>
+                            </div>
+                            {role === 'admin' && (
                               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                                 <div className="bg-emerald-600 h-full transition-all duration-500" style={{ width: `${persen}%` }}></div>
                               </div>
-                            </div>
-                          );
-                        })}
-                        {perBlok.length === 0 && <p className="text-slate-400 italic text-[11px]">Belum ada blok terdaftar.</p>}
-                      </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {perBlok.length === 0 && <p className="text-slate-400 italic text-[11px]">{role === 'admin' ? 'Belum ada blok terdaftar.' : 'Data blok Anda belum terdaftar.'}</p>}
                     </div>
-                  )}
+                  </div>
 
                   {/* WARGA TERBARU & WARGA KELUAR (dibagi 2 kolom berdampingan) */}
                   <div className="grid sm:grid-cols-2 gap-4">
@@ -3440,7 +3649,7 @@ export default function IuranWargaRTApp() {
                           <div className="bg-emerald-600 h-full transition-all duration-700" style={{ width: `${persentaseCapaian}%` }}></div>
                         </div>
                         <p className="text-slate-400 font-medium mt-2">Anda telah menyelesaikan {userRows.filter(r => r.status === 'LUNAS').length} dari 12 angsuran.</p>
-                        <h4 className="font-black text-slate-900 uppercase text-[10px] mt-4 mb-1">Timeline Pembayaran Jan - Des {periodeTahun}</h4>
+                        <h4 className="font-black text-slate-900 uppercase text-[10px] mt-4 mb-1">Timeline Pembayaran {labelRentangPeriode}</h4>
                         <BarTimeline data={userTimeline} />
                       </div>
                       <div className="space-y-4">
@@ -3670,7 +3879,7 @@ export default function IuranWargaRTApp() {
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <div className="sm:col-span-2 bg-white p-5 rounded-2xl border text-xs">
                         <div className="flex justify-between items-center mb-1">
-                          <h4 className="font-black text-slate-900 uppercase text-[10px]">Timeline Pemasukan Jan - Des {periodeTahun}</h4>
+                          <h4 className="font-black text-slate-900 uppercase text-[10px]">Timeline Pemasukan {labelRentangPeriode}</h4>
                           <select value={adminTimelineFilter} onChange={(e) => setAdminTimelineFilter(e.target.value)} className="border p-1.5 rounded-lg bg-slate-50 font-bold text-[10px]">
                             <option value="Semua">Semua Warga</option>
                             {members.map(m => <option key={m.id} value={m.nama}>{m.nama}</option>)}
@@ -3925,13 +4134,19 @@ export default function IuranWargaRTApp() {
                             </div>
                             <span className={`px-2 py-0.5 rounded text-[10px] shrink-0 ${k.status === 'Progress' ? 'bg-emerald-600 text-white' : 'bg-slate-400 text-white'}`}>{k.status}</span>
                           </div>
+                          {/* RINGKASAN JUMLAH KK & JUMLAH JIWA BLOK INI (dihitung otomatis
+                              dari data Anggota + Anggota Keluarga yang tersinkron Google Sheet) */}
+                          <div className="flex gap-2 text-[10px]">
+                            <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-lg font-black flex-1 text-center">{anggotaKelompok.length} KK</span>
+                            <span className="bg-sky-50 text-sky-700 px-2 py-1 rounded-lg font-black flex-1 text-center">{totalJiwa} Jiwa</span>
+                          </div>
                           <ul className="space-y-1 text-slate-700">
                             {anggotaKelompok.map((m, i) => <li key={i}>• {m.nama} <span className="text-slate-400 font-normal">({m.statusRumah || '-'}, {(m.anggotaKeluarga || []).length} anggota keluarga)</span></li>)}
                             {anggotaKelompok.length === 0 && <li className="text-slate-400 italic">Belum ada anggota</li>}
                           </ul>
                           {/* KATEGORI USIA OTOMATIS (dihitung dari seluruh anggota keluarga di blok ini) */}
                           <div className="pt-2 border-t">
-                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wide block mb-1.5">Rekap Usia Otomatis • Total {totalJiwa} jiwa</span>
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wide block mb-1.5">Rekap Usia Otomatis</span>
                             <div className="grid grid-cols-1 gap-1">
                               {KATEGORI_USIA_LIST.map(kat => (
                                 <div key={kat} className="flex items-center justify-between bg-white border rounded-lg px-2 py-1 text-[10px]">
@@ -4071,14 +4286,15 @@ export default function IuranWargaRTApp() {
                           {daftarKeluarga.map(a => {
                             const usia = hitungUsia(a.tanggalLahir);
                             return (
-                              <tr key={a.id} className="border-b last:border-0">
+                              <tr key={a.id} className={`border-b last:border-0 ${editingAnggotaKeluargaId === a.id ? 'bg-amber-50' : ''}`}>
                                 <td className="py-2.5 pr-2 font-black text-slate-900">{a.nama}</td>
                                 <td className="py-2.5 pr-2 text-emerald-700 font-bold">{a.hubungan || '-'}</td>
                                 <td className="py-2.5 pr-2 text-slate-500">{a.jenisKelamin}</td>
                                 <td className="py-2.5 pr-2 text-slate-500">{a.tanggalLahir}</td>
                                 <td className="py-2.5 pr-2 text-slate-700 font-bold">{usia !== null ? `${usia} tahun` : '-'}</td>
                                 <td className="py-2.5 pr-2"><span className="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-700">{kategoriUsia(usia)}</span></td>
-                                <td className="py-2.5 pr-2">
+                                <td className="py-2.5 pr-2 flex gap-2">
+                                  <button onClick={() => handleMulaiEditAnggotaKeluargaUser(a)} className="bg-amber-100 text-amber-700 px-2.5 py-1 rounded text-[10px] font-bold">Edit</button>
                                   <button onClick={() => handleHapusAnggotaKeluargaUser(a.id)} className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded text-[10px] font-bold">Hapus</button>
                                 </td>
                               </tr>
@@ -4092,11 +4308,16 @@ export default function IuranWargaRTApp() {
                     </div>
                   </div>
 
-                  {/* TAMBAH ANGGOTA KELUARGA BARU */}
+                  {/* TAMBAH / EDIT ANGGOTA KELUARGA */}
                   <div className="bg-white p-6 rounded-2xl border shadow-xs">
-                    <h4 className="text-xs font-extrabold text-slate-900 uppercase mb-1">+ Tambah Anggota Keluarga</h4>
-                    <p className="text-[11px] text-slate-400 mb-3">Mis. ada anggota keluarga baru (anak baru lahir, dll). Data ini otomatis ikut terhitung di rekap usia untuk pengurus RT.</p>
-                    <form onSubmit={handleTambahAnggotaKeluargaUser} className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs font-semibold bg-slate-50 border rounded-xl p-3">
+                    <div className="flex justify-between items-center mb-1">
+                      <h4 className="text-xs font-extrabold text-slate-900 uppercase">{editingAnggotaKeluargaId ? '✏️ Edit Anggota Keluarga' : '+ Tambah Anggota Keluarga'}</h4>
+                      {editingAnggotaKeluargaId && (
+                        <button type="button" onClick={handleBatalEditAnggotaKeluargaUser} className="text-[10px] font-bold text-amber-700 underline">Batalkan Edit</button>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mb-3">{editingAnggotaKeluargaId ? 'Ubah data anggota keluarga yang sudah tercatat. Perubahan langsung tersimpan & terhubung ke data admin.' : 'Mis. ada anggota keluarga baru (anak baru lahir, dll). Data ini otomatis ikut terhitung di rekap usia untuk pengurus RT.'}</p>
+                    <form onSubmit={handleTambahAnggotaKeluargaUser} className={`grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs font-semibold border rounded-xl p-3 ${editingAnggotaKeluargaId ? 'bg-amber-50 border-amber-300' : 'bg-slate-50'}`}>
                       <input type="text" required placeholder="Nama lengkap" value={formTambahAnggotaUser.nama} onChange={(e) => setFormTambahAnggotaUser({...formTambahAnggotaUser, nama: e.target.value})} className="w-full border p-2 rounded-lg bg-white" />
                       <select required value={formTambahAnggotaUser.hubungan} onChange={(e) => setFormTambahAnggotaUser({...formTambahAnggotaUser, hubungan: e.target.value})} className="w-full border p-2 rounded-lg bg-white font-bold">
                         {HUBUNGAN_KELUARGA_LIST.map(h => <option key={h} value={h}>{h}</option>)}
@@ -4106,7 +4327,7 @@ export default function IuranWargaRTApp() {
                         <option value="Laki-laki">Laki-laki</option>
                       </select>
                       <input type="date" required value={formTambahAnggotaUser.tanggalLahir} onChange={(e) => setFormTambahAnggotaUser({...formTambahAnggotaUser, tanggalLahir: e.target.value})} className="w-full border p-2 rounded-lg bg-white" />
-                      <button type="submit" className="sm:col-span-4 bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg">+ Tambah Anggota</button>
+                      <button type="submit" className={`sm:col-span-4 text-white font-bold px-4 py-2 rounded-lg ${editingAnggotaKeluargaId ? 'bg-amber-600' : 'bg-emerald-700'}`}>{editingAnggotaKeluargaId ? '💾 Simpan Perubahan' : '+ Tambah Anggota'}</button>
                     </form>
                   </div>
                 </div>
@@ -4381,7 +4602,7 @@ export default function IuranWargaRTApp() {
                   </div>
                   <div className="space-y-2 text-xs font-semibold">
                     {realisasiBelanja.map(r => (
-                      <div key={r.id} className="p-3 bg-slate-50 border rounded-xl flex justify-between items-center flex-wrap gap-2">
+                      <div key={r.id} className={`p-3 bg-slate-50 border rounded-xl flex justify-between items-center flex-wrap gap-2 ${editingRealisasiId === r.id ? 'ring-2 ring-amber-400' : ''}`}>
                         <div className="min-w-0">
                           <span className="inline-block text-[9px] font-black uppercase tracking-wide bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full mb-1">{r.kategori}</span>
                           <p className="text-slate-900 font-bold">{r.keterangan}</p>
@@ -4391,6 +4612,7 @@ export default function IuranWargaRTApp() {
                           {r.buktiUrl && (
                             <button onClick={() => setPreviewLampiran({ judul: r.keterangan, url: r.buktiUrl, namaFile: r.buktiNamaFile, tipe: 'gambar' })} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded-lg">📷 Bukti</button>
                           )}
+                          <button onClick={() => handleEditRealisasiBelanja(r)} className="bg-amber-100 text-amber-700 px-2.5 py-1 rounded-lg font-black">Edit</button>
                           <button onClick={() => handleHapusRealisasiBelanja(r.id)} className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded-lg">Hapus</button>
                         </div>
                       </div>
@@ -4398,8 +4620,16 @@ export default function IuranWargaRTApp() {
                     {realisasiBelanja.length === 0 && <p className="text-slate-400 italic">Belum ada realisasi belanja tercatat.</p>}
                   </div>
 
-                  <form onSubmit={handleTambahRealisasiBelanja} className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-2">
-                    <p className="text-emerald-800 font-black text-[11px]">+ Tambah Realisasi Belanja</p>
+                  <form onSubmit={handleTambahRealisasiBelanja} className={`border rounded-xl p-4 space-y-2 ${editingRealisasiId ? 'bg-amber-50 border-amber-300' : 'bg-emerald-50 border-emerald-200'}`}>
+                    <div className="flex justify-between items-center">
+                      <p className={`font-black text-[11px] ${editingRealisasiId ? 'text-amber-700' : 'text-emerald-800'}`}>{editingRealisasiId ? '✏️ Edit Realisasi Belanja' : '+ Tambah Realisasi Belanja'}</p>
+                      {editingRealisasiId && (
+                        <button type="button" onClick={handleBatalEditRealisasiBelanja} className="text-[10px] font-bold text-amber-700 underline">Batalkan Edit</button>
+                      )}
+                    </div>
+                    {editingRealisasiId && (
+                      <p className="text-[10px] text-amber-700 -mt-1">Kosongkan field Tanggal kalau tidak ingin mengubah tanggal yang sudah tercatat.</p>
+                    )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div>
                         <label className="block mb-1 text-slate-600">Tanggal</label>
@@ -4443,7 +4673,7 @@ export default function IuranWargaRTApp() {
                       </div>
                     </div>
                     <div className="flex justify-end pt-1">
-                      <button type="submit" className="bg-emerald-700 text-white font-bold px-4 py-1.5 rounded-xl text-[11px]">+ Simpan Realisasi</button>
+                      <button type="submit" className={`text-white font-bold px-4 py-1.5 rounded-xl text-[11px] ${editingRealisasiId ? 'bg-amber-600' : 'bg-emerald-700'}`}>{editingRealisasiId ? '💾 Simpan Perubahan' : '+ Simpan Realisasi'}</button>
                     </div>
                   </form>
                 </div>
@@ -4534,6 +4764,55 @@ export default function IuranWargaRTApp() {
                   </div>
                 </div>
 
+                {/* KELOLA BLOK / KELOMPOK (TAMBAH, GANTI NAMA, TUTUP, HAPUS)
+                    -----------------------------------------------------------
+                    Sebelumnya daftar blok/kelompok TIDAK bisa dikelola sama
+                    sekali dari Web Utama (cuma bisa dilihat sebagai dropdown
+                    di form lain) - kalau ada nama blok lama/tidak relevan
+                    (mis. sisa data awal "Kelompok Sapi A/B/C"), admin TIDAK
+                    punya cara mengubahnya kecuali edit langsung di Google
+                    Sheet. Panel ini melengkapi itu supaya admin bisa
+                    menambah, mengganti nama, menutup, atau menghapus blok
+                    langsung dari sini - otomatis tersinkron ke Google Sheet
+                    tab "Kelompok" dan langsung terlihat oleh semua akun. */}
+                <div className="bg-white p-6 rounded-2xl border shadow-xs">
+                  <h4 className="text-xs font-extrabold text-slate-900 uppercase mb-1">Kelola Blok / Kelompok</h4>
+                  <p className="text-[11px] text-slate-400 mb-4">Tambah blok baru, ganti nama blok yang sudah tidak relevan, tutup pendaftaran blok penuh, atau hapus blok yang tidak dipakai.</p>
+
+                  <div className="space-y-2 mb-4">
+                    {kelompokList.map(k => (
+                      <div key={k.id} className="flex items-center gap-3 p-2.5 bg-slate-50 border rounded-xl text-xs">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-black text-slate-900 truncate">{k.nama} <span className="text-slate-400 font-normal">({k.jenis})</span></p>
+                          <p className="text-[10px] text-slate-400">{members.filter(m => m.kelompok === k.nama).length} KK terdaftar • No. {k.noPengajuan}</p>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-black shrink-0 ${k.status === 'Progress' ? 'bg-emerald-600 text-white' : 'bg-slate-400 text-white'}`}>{k.status}</span>
+                        <button type="button" onClick={() => handleToggleStatusKelompok(k.id)} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded text-[10px] font-bold shrink-0">{k.status === 'Progress' ? 'Tutup' : 'Buka'}</button>
+                        <button type="button" onClick={() => handleEditKelompok(k)} className="bg-amber-100 text-amber-700 px-2.5 py-1 rounded text-[10px] font-bold shrink-0">Edit</button>
+                        <button type="button" onClick={() => handleHapusKelompok(k)} className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded text-[10px] font-bold shrink-0">Hapus</button>
+                      </div>
+                    ))}
+                    {kelompokList.length === 0 && <p className="text-slate-400 italic text-[11px]">Belum ada blok/kelompok yang ditambahkan.</p>}
+                  </div>
+
+                  <form onSubmit={handleTambahKelompok} className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 space-y-2">
+                    <p className="text-emerald-800 font-black text-[11px]">{editingKelompokId ? 'Edit Blok/Kelompok' : 'Tambah Blok/Kelompok Baru'}</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <input type="text" placeholder="Nama Blok (mis. Blok H1)" value={formKelompokBaru.nama} onChange={(e) => setFormKelompokBaru({...formKelompokBaru, nama: e.target.value})} className="w-full border p-2 rounded-xl bg-white" />
+                      <select value={formKelompokBaru.jenis} onChange={(e) => setFormKelompokBaru({...formKelompokBaru, jenis: e.target.value})} className="w-full border p-2 rounded-xl bg-white">
+                        <option value="Rumah">Rumah</option>
+                        <option value="Ruko">Ruko</option>
+                        <option value="Lainnya">Lainnya</option>
+                      </select>
+                      <input type="text" placeholder="No. Pengajuan (opsional, otomatis jika kosong)" value={formKelompokBaru.noPengajuanManual} onChange={(e) => setFormKelompokBaru({...formKelompokBaru, noPengajuanManual: e.target.value})} className="w-full border p-2 rounded-xl bg-white" />
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="submit" className="bg-emerald-600 text-white px-4 py-2 rounded-xl font-bold text-[11px]">{editingKelompokId ? 'Simpan Perubahan' : 'Tambah Blok'}</button>
+                      {editingKelompokId && <button type="button" onClick={handleBatalEditKelompok} className="bg-slate-200 text-slate-700 px-4 py-2 rounded-xl font-bold text-[11px]">Batal</button>}
+                    </div>
+                  </form>
+                </div>
+
                 {/* PANEL KONTROL & PLOTTING + RESET PASSWORD ANGGOTA
                     (Dipindahkan dari tab Dashboard Utama ke sini, paling bawah tab Member Baru,
                     sesuai permintaan admin, supaya seluruh pengelolaan anggota terpusat di sini.) */}
@@ -4569,6 +4848,7 @@ export default function IuranWargaRTApp() {
                             <span className="text-slate-400 font-normal">Ubah status {selectedMemberIds.length > 0 ? 'anggota tercentang' : 'SEMUA anggota yang tampil'}:</span>
                             <button onClick={() => handleUbahStatusMassal(idsUntukAksi, 'Aktif')} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg transition-transform hover:scale-[1.03]">Set Aktif</button>
                             <button onClick={() => handleUbahStatusMassal(idsUntukAksi, 'Pasif')} className="bg-slate-700 text-white px-3 py-1.5 rounded-lg transition-transform hover:scale-[1.03]">Set Pasif</button>
+                            <button onClick={() => handleHapusMemberPasifMassal(idsUntukAksi)} className="bg-rose-600 text-white px-3 py-1.5 rounded-lg transition-transform hover:scale-[1.03]">🗑️ Hapus Warga Pasif Terpilih</button>
                           </div>
                         </div>
 
@@ -4595,6 +4875,9 @@ export default function IuranWargaRTApp() {
                                 </select>
                                 <button onClick={() => toggleStatusAnggota(m.id)} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[10px]">Toggle Status</button>
                                 <button onClick={() => handleAdminResetPassword(m.id)} className="bg-rose-600 text-white px-2.5 py-1 rounded text-[10px]">Reset Password</button>
+                                {m.statusAnggota === 'Pasif' && (
+                                  <button onClick={() => handleHapusMemberPasif(m)} className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded text-[10px] font-black" title="Hapus permanen akun warga Pasif ini">🗑️ Hapus</button>
+                                )}
                               </div>
                             </div>
                           ))}
@@ -5103,6 +5386,19 @@ export default function IuranWargaRTApp() {
                     </div>
                   </div>
                   <button onClick={handleTutupPeriode} className="mt-5 bg-rose-600 hover:bg-rose-700 text-white font-black px-6 py-2.5 rounded-xl transition-transform duration-150 hover:scale-[1.02] shadow-lg">🔒 Tutup Periode Ini &amp; Buka Periode Baru</button>
+                </div>
+
+                {/* ATUR TANGGAL MULAI PERIODE (TIDAK HARUS JANUARI-DESEMBER) */}
+                <div className="bg-white p-6 rounded-2xl border shadow-xs text-xs font-semibold">
+                  <h3 className="text-sm font-black text-slate-900">Atur Tanggal Mulai Periode</h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5 max-w-lg">Cukup isi 1 tanggal mulai (contoh: 01-07-2026 untuk periode "Juli 2026"). Sistem otomatis menyusun siklus 12 bulan tagihan mulai dari bulan tersebut - <strong>tidak harus Januari-Desember</strong> - dan langsung berlaku otomatis di akun seluruh warga tanpa perlu diatur satu per satu. Periode berjalan saat ini: <strong className="text-emerald-700">{labelRentangPeriode}</strong>.</p>
+                  <form onSubmit={handleSimpanPengaturanPeriode} className="flex flex-wrap items-end gap-3 mt-4">
+                    <div>
+                      <label className="block text-slate-600 mb-1">Tanggal Mulai Periode</label>
+                      <input type="date" value={formPengaturanPeriode.tanggalMulai} onChange={(e) => setFormPengaturanPeriode({ tanggalMulai: e.target.value })} className="border p-2 rounded-xl bg-slate-50" required />
+                    </div>
+                    <button type="submit" className="bg-emerald-700 text-white font-bold px-6 py-2.5 rounded-xl transition-transform duration-150 hover:scale-[1.01] shadow-lg">💾 Simpan Pengaturan Periode</button>
+                  </form>
                 </div>
 
                 <div className="bg-white p-6 rounded-2xl border shadow-xs">
