@@ -79,6 +79,9 @@ function PilihanDropdown({ value, options, onChange, placeholder = 'Pilih' }) {
 // di antara tanda kutip di bawah ini, formatnya:
 // 'https://script.google.com/macros/s/xxxxxxxxxxxxx/exec'
 const DEFAULT_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwj360UDFOVK0bS-3Sx8iyFFQcHgo4DLuE6ly8eUgk4HbRPWzPWNnuZwaG3xRhUEfXPRw/exec';
+// Kunci rahasia aplikasi - HARUS SAMA PERSIS dengan APP_SECRET di Code.gs.
+// 'tes123' hanya untuk testing awal, WAJIB diganti sebelum di-share ke warga.
+const APP_SECRET = 'tes123';
 
 export default function IuranWargaRTApp() {
   // ==========================================
@@ -539,11 +542,17 @@ export default function IuranWargaRTApp() {
   // supaya browser SELALU mengambil jawaban baru dari server, bukan dari cache.
   const sheetFetch = async (url, options) => {
     const metodeGet = !options || !options.method || options.method === 'GET';
-    const urlFinal = metodeGet ? `${url}${url.includes('?') ? '&' : '?'}_ts=${Date.now()}` : url;
+    const urlFinal = metodeGet
+      ? `${url}${url.includes('?') ? '&' : '?'}secret=${encodeURIComponent(APP_SECRET)}&_ts=${Date.now()}`
+      : url;
     const optionsFinal = { ...(options || {}), cache: 'no-store' };
+    if (!metodeGet && optionsFinal.body) {
+      const bodyObj = JSON.parse(optionsFinal.body);
+      optionsFinal.body = JSON.stringify({ ...bodyObj, secret: APP_SECRET });
+    }
     const res = await fetch(urlFinal, optionsFinal);
     const text = await res.text();
-    try { return JSON.parse(text); } catch { throw new Error('Respons Apps Script bukan JSON yang valid. Pastikan URL benar dan deployment "Anyone can access".'); }
+    try { return JSON.parse(text); } catch { throw new Error('Respons Apps Script bukan JSON yang valid. Pastikan URL & secret benar, dan deployment "Anyone can access".'); }
   };
 
   // ==========================================
@@ -805,41 +814,31 @@ export default function IuranWargaRTApp() {
     if (sunyi && pendingSyncCountRef.current > 0) return;
     setSheetStatus('loading');
     try {
-      // PERBAIKAN PENTING: SEMUA fetch di bawah sekarang punya .catch() masing-
-      // masing. SEBELUMNYA sebagian besar (termasuk getStrukturRT) TIDAK punya
-      // .catch() -> kalau SATU SAJA sheet gagal diambil (mis. header sel
-      // kosong/berubah, atau baris data yang bikin error saat dibaca Apps
-      // Script), Promise.all LANGSUNG GAGAL TOTAL dan SEMUA data lain (Anggota,
-      // Iuran, Struktur RT, dst) ikut GAGAL dimuat - padahal cuma satu sheet
-      // yang sebenarnya bermasalah. Inilah kemungkinan besar penyebab "Struktur
-      // Pengurus RT tidak konek ke GSheet": begitu salah satu sheet lain gagal,
-      // foto/nama pengurus RT ikut gagal ter-update walau data di tab
-      // StrukturRT sendiri sudah benar. Sekarang tiap sheet gagal SENDIRI-
-      // SENDIRI (tidak saling menjatuhkan) dan errornya dicatat di console
-      // supaya gampang dilacak kalau terulang.
-      const [
-        dataAnggota, dataIuran, dataKegiatan, dataKelompok,
-        dataPengajuan, dataStruktur, dataPengaturan, dataPeriode, dataRiwayatPeriode,
-        dataRiwayatKasRt, dataRealisasi, dataAgendaUtama, dataNotifikasi, dataWargaKeluar, dataTunggakan
-      ] = await Promise.all([
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getMembers`).catch((err) => { console.error('getMembers gagal:', err); return []; }),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getIuran`).catch((err) => { console.error('getIuran gagal:', err); return []; }),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getKegiatan`).catch((err) => { console.error('getKegiatan gagal:', err); return []; }),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getKelompok`).catch((err) => { console.error('getKelompok gagal:', err); return []; }),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getPengajuan`).catch((err) => { console.error('getPengajuan gagal:', err); return []; }),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getStrukturRT`).catch((err) => { console.error('getStrukturRT gagal:', err); return []; }),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getPengaturan`).catch((err) => { console.error('getPengaturan gagal:', err); return []; }),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getPeriode`).catch((err) => { console.error('getPeriode gagal:', err); return []; }),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRiwayatPeriode`).catch((err) => { console.error('getRiwayatPeriode gagal:', err); return []; }),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRiwayatKasRt`).catch((err) => { console.error('getRiwayatKasRt gagal:', err); return []; }),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getRealisasiBelanja`).catch((err) => { console.error('getRealisasiBelanja gagal:', err); return []; }),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getAgendaUtama`).catch((err) => { console.error('getAgendaUtama gagal:', err); return []; }),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getNotifikasi`).catch((err) => { console.error('getNotifikasi gagal:', err); return []; }),
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getWargaKeluar`).catch((err) => { console.error('getWargaKeluar gagal:', err); return []; }),
-        // Sheet "Tunggakan" mungkin belum ada di Apps Script versi lama -> .catch()
-        // supaya tidak menggagalkan pemuatan data lain (backward compatible).
-        sheetFetch(`${cmsTeks.appsScriptUrl}?action=getTunggakan`).catch((err) => { console.error('getTunggakan gagal:', err); return []; })
-      ]);
+      // PERBAIKAN RELIABILITY: sebelumnya di sini ada 15 request GET paralel
+      // (Promise.all) setiap kali halaman dibuka -> di koneksi HP yang lambat
+      // ini rawan gagal sebagian/timeout, dan hasilnya beda-beda tiap device.
+      // Sekarang cukup 1 request ke action "getAll" yang menggabungkan semua
+      // sheet sekaligus di sisi server (lihat Code.gs), jauh lebih tahan
+      // terhadap koneksi tidak stabil.
+      const semua = await sheetFetch(`${cmsTeks.appsScriptUrl}?action=getAll`);
+      if (semua && semua.error) throw new Error(semua.error);
+
+      const dataAnggota = semua.members || [];
+      const dataIuran = semua.iuran || [];
+      const dataKegiatan = semua.kegiatan || [];
+      const dataKelompok = semua.kelompok || [];
+      const dataPengajuan = semua.pengajuan || [];
+      const dataStruktur = semua.strukturRT || [];
+      const dataPengaturan = semua.pengaturan || [];
+      const dataPeriode = semua.periode || [];
+      const dataRiwayatPeriode = semua.riwayatPeriode || [];
+      const dataRiwayatKasRt = semua.riwayatKasRt || [];
+      const dataRealisasi = semua.realisasiBelanja || [];
+      const dataAgendaUtama = semua.agendaUtama || [];
+      const dataNotifikasi = semua.notifikasi || [];
+      const dataWargaKeluar = semua.wargaKeluar || [];
+      const dataTunggakan = semua.tunggakan || [];
+
       if (Array.isArray(dataAnggota) && dataAnggota.length) {
         setMembers(dataAnggota.map(m => ({ ...m, target: Number(m.target) || 0, anggotaKeluarga: parseAnggotaKeluarga(m.anggotaKeluarga) })));
         setDataWargaAsliSudahMasuk(true);
@@ -2302,7 +2301,7 @@ export default function IuranWargaRTApp() {
   // ==========================================
   // LOGIN RESMI WARGA (USERNAME & PASSWORD) DARI WEB UTAMA
   // ==========================================
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
 
@@ -2313,7 +2312,8 @@ export default function IuranWargaRTApp() {
     // password yang diketik di form ini cocok dengan akun Super Admin
     // (adminAccount, bawaan admin/admin123, bisa diganti lewat menu "Ubah
     // Login Admin Panel"), sistem langsung memberi akses Admin penuh dari
-    // sini juga - tanpa perlu tautan/tombol tersembunyi apa pun.
+    // sini juga - tanpa perlu tautan/tombol tersembunyi apa pun. Akun Admin
+    // ini memang tidak disimpan di Google Sheets, jadi tetap dicek lokal.
     // .trim() dipakai di username & password supaya spasi tak sengaja dari
     // keyboard HP (autocorrect/autocapitalize) tidak bikin login gagal.
     // ==========================================
@@ -2331,30 +2331,56 @@ export default function IuranWargaRTApp() {
       return;
     }
 
-    const found = members.find(m => m.username.toLowerCase() === formLogin.username.trim().toLowerCase() && m.password === formLogin.password);
-    if (!found) {
-      setLoginError('Username atau password salah. Periksa kembali email aktivasi/reset password Anda.');
+    // ==========================================
+    // LOGIN WARGA - DIVERIFIKASI DI SERVER (Apps Script), BUKAN di browser.
+    // -----------------------------------------------------------
+    // PERBAIKAN KEAMANAN: sebelumnya seluruh daftar password warga harus
+    // ikut dikirim ke browser SEMUA orang supaya bisa dicocokkan di sini
+    // (members.find(...)). Sekarang password TIDAK PERNAH dikirim ke
+    // browser - pencocokan username/password dilakukan di Code.gs, dan
+    // yang dikembalikan ke sini hanya data profil warga tanpa password.
+    // ==========================================
+    if (!cmsTeks.appsScriptUrl) {
+      setLoginError('Google Sheets belum tersambung, hubungi pengurus RT.');
       return;
     }
-    if (found.statusAnggota === 'Pasif') {
-      setLoginError('Akun Anda berstatus Pasif. Silakan hubungi Bendahara/Panitia untuk mengaktifkan kembali.');
-      return;
+
+    try {
+      const hasil = await sheetFetch(cmsTeks.appsScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'login', username: formLogin.username.trim(), password: formLogin.password.trim() })
+      });
+
+      if (!hasil || hasil.error || !hasil.member) {
+        setLoginError('Username atau password salah. Periksa kembali email aktivasi/reset password Anda.');
+        return;
+      }
+
+      const found = { ...hasil.member, target: Number(hasil.member.target) || 0, anggotaKeluarga: parseAnggotaKeluarga(hasil.member.anggotaKeluarga) };
+      if (found.statusAnggota === 'Pasif') {
+        setLoginError('Akun Anda berstatus Pasif. Silakan hubungi Bendahara/Panitia untuk mengaktifkan kembali.');
+        return;
+      }
+
+      setActiveUserSession(found);
+      setIsSimulatedSession(false); // login resmi -> seluruh laporan memakai data ASLI
+      // Jika akses warga ini "admin" (diatur lewat Manajemen Akses), berikan akses penuh
+      // setara Admin Panel. Jika "user" (default), akses tetap terbatas ke Dashboard Warga.
+      if (found.akses === 'admin') {
+        setRole('admin');
+        setAdminLoggedIn(true);
+      } else {
+        setRole('user');
+        setAdminLoggedIn(false);
+      }
+      setView('dashboard');
+      setActiveMenu('dashboard');
+      setFormLogin({ username: '', password: '' });
+      showToast(`Selamat datang, ${found.nama}!${found.akses === 'admin' ? ' Anda login dengan akses Admin (penuh).' : ''}`);
+    } catch (err) {
+      setLoginError('Gagal menghubungi server, cek koneksi internet Anda.');
     }
-    setActiveUserSession(found);
-    setIsSimulatedSession(false); // login resmi -> seluruh laporan memakai data ASLI
-    // Jika akses warga ini "admin" (diatur lewat Manajemen Akses), berikan akses penuh
-    // setara Admin Panel. Jika "user" (default), akses tetap terbatas ke Dashboard Warga.
-    if (found.akses === 'admin') {
-      setRole('admin');
-      setAdminLoggedIn(true);
-    } else {
-      setRole('user');
-      setAdminLoggedIn(false);
-    }
-    setView('dashboard');
-    setActiveMenu('dashboard');
-    setFormLogin({ username: '', password: '' });
-    showToast(`Selamat datang, ${found.nama}!${found.akses === 'admin' ? ' Anda login dengan akses Admin (penuh).' : ''}`);
   };
 
   // ==========================================
@@ -2638,12 +2664,18 @@ export default function IuranWargaRTApp() {
   };
 
   // GANTI PASSWORD OLEH USER SENDIRI
-  const handleUserGantiPassword = (e) => {
+  // -----------------------------------------------------------
+  // PERBAIKAN KEAMANAN: sebelumnya password lama dicocokkan di browser
+  // (activeUserSession.password), yang berarti password harus ada di
+  // memori client. Sekarang password TIDAK PERNAH ada di client sama
+  // sekali - verifikasi password lama & update password baru dilakukan
+  // sepenuhnya di server (Code.gs action "gantiPasswordUser"), dan hanya
+  // menyentuh 1 baris/1 sel milik warga yang bersangkutan (tidak lewat
+  // overwrite tabel penuh, jadi tidak mengganggu data warga lain).
+  const handleUserGantiPassword = async (e) => {
     e.preventDefault();
-    if (formUbahPassword.lama !== activeUserSession.password) {
-      setPasswordMsg({ tipe: 'error', teks: 'Password lama yang Anda masukkan salah.' });
-      return;
-    }
+    setPasswordMsg({ tipe: '', teks: '' });
+
     if (formUbahPassword.baru.length < 6) {
       setPasswordMsg({ tipe: 'error', teks: 'Password baru minimal 6 karakter.' });
       return;
@@ -2652,11 +2684,33 @@ export default function IuranWargaRTApp() {
       setPasswordMsg({ tipe: 'error', teks: 'Konfirmasi password baru tidak sama.' });
       return;
     }
-    const updated = members.map(m => m.id === activeUserSession.id ? { ...m, password: formUbahPassword.baru } : m);
-    updateMembers(updated);
-    setActiveUserSession({ ...activeUserSession, password: formUbahPassword.baru });
-    setFormUbahPassword({ lama: '', baru: '', konfirmasi: '' });
-    setPasswordMsg({ tipe: 'sukses', teks: 'Password berhasil diperbarui. Gunakan password baru pada login berikutnya.' });
+    if (!cmsTeks.appsScriptUrl) {
+      setPasswordMsg({ tipe: 'error', teks: 'Google Sheets belum tersambung.' });
+      return;
+    }
+
+    try {
+      const hasil = await sheetFetch(cmsTeks.appsScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'gantiPasswordUser',
+          userId: activeUserSession.id,
+          passwordLama: formUbahPassword.lama,
+          passwordBaru: formUbahPassword.baru,
+        })
+      });
+
+      if (!hasil || hasil.error) {
+        setPasswordMsg({ tipe: 'error', teks: (hasil && hasil.error) || 'Gagal mengganti password.' });
+        return;
+      }
+
+      setFormUbahPassword({ lama: '', baru: '', konfirmasi: '' });
+      setPasswordMsg({ tipe: 'sukses', teks: 'Password berhasil diperbarui. Gunakan password baru pada login berikutnya.' });
+    } catch (err) {
+      setPasswordMsg({ tipe: 'error', teks: 'Gagal menghubungi server, cek koneksi internet.' });
+    }
   };
 
   // ==========================================
@@ -4824,12 +4878,7 @@ export default function IuranWargaRTApp() {
                         <div>
                           <strong>{m.nama}</strong>
                           <p className="text-slate-400">{m.username} | {m.kelompok}</p>
-                          <p className="text-slate-400 flex items-center gap-1.5 mt-0.5">
-                            Password: <span className="font-mono font-bold text-slate-700">{visiblePasswordIds.includes(m.id) ? m.password : '••••••••'}</span>
-                            <button type="button" onClick={() => togglePasswordVisibility(m.id)} className="text-emerald-700 font-bold text-[10px] underline underline-offset-2">
-                              {visiblePasswordIds.includes(m.id) ? 'Sembunyikan' : 'Lihat'}
-                            </button>
-                          </p>
+                          <p className="text-slate-400 mt-0.5">Password: <span className="italic text-slate-300">tersembunyi (gunakan Reset Password)</span></p>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${(m.akses || 'user') === 'admin' ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-600'}`}>
@@ -4946,11 +4995,8 @@ export default function IuranWargaRTApp() {
                                 <div>
                                   <span className="text-sm font-black text-slate-900 block">{m.nama}</span>
                                   <span className="text-slate-400 font-normal">{m.nomorRumah} | Status: <span className={m.statusAnggota === 'Aktif' ? 'text-emerald-700 font-bold' : 'text-rose-500 font-bold'}>{m.statusAnggota}</span></span>
-                                  <span className="text-slate-400 font-normal flex items-center gap-1.5 mt-0.5">
-                                    Username: <span className="font-mono text-slate-700">{m.username}</span> | Password: <span className="font-mono font-bold text-slate-700">{visiblePasswordIds.includes(m.id) ? m.password : '••••••••'}</span>
-                                    <button type="button" onClick={() => togglePasswordVisibility(m.id)} className="text-emerald-700 font-bold text-[10px] underline underline-offset-2">
-                                      {visiblePasswordIds.includes(m.id) ? 'Sembunyikan' : 'Lihat'}
-                                    </button>
+                                  <span className="text-slate-400 font-normal mt-0.5">
+                                    Username: <span className="font-mono text-slate-700">{m.username}</span>
                                   </span>
                                 </div>
                               </div>
