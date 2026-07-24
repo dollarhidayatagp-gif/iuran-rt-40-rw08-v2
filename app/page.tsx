@@ -78,7 +78,7 @@ function PilihanDropdown({ value, options, onChange, placeholder = 'Pilih' }) {
 // CARA ISI: tempel "Web app URL" hasil Deploy dari Apps Script (Code.gs)
 // di antara tanda kutip di bawah ini, formatnya:
 // 'https://script.google.com/macros/s/xxxxxxxxxxxxx/exec'
-const DEFAULT_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwj360UDFOVK0bS-3Sx8iyFFQcHgo4DLuE6ly8eUgk4HbRPWzPWNnuZwaG3xRhUEfXPRw/exec';
+const DEFAULT_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwr2SnfxwirNXy1MKn9gy4GmT-oPkEMfP2QKirB2csLT5rGOUQXHHSVVg-xla6uShxb/exec';
 // Kunci rahasia aplikasi - HARUS SAMA PERSIS dengan APP_SECRET di Code.gs.
 // 'tes123' hanya untuk testing awal, WAJIB diganti sebelum di-share ke warga.
 const APP_SECRET = 'tes123';
