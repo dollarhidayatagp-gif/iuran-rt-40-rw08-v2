@@ -578,12 +578,13 @@ export default function IuranWargaRTApp() {
 
   // Kirim (overwrite) satu tabel penuh ke Google Sheet. Dipakai setelah setiap
   // perubahan Anggota/Iuran supaya Sheet selalu jadi cerminan data terbaru.
-  const syncSheet = async (sheetName, data) => {
-    if (!cmsTeks.appsScriptUrl) return;
+  const syncSheet = async (sheetName, data, urlOverride) => {
+    const urlTujuan = urlOverride || cmsTeks.appsScriptUrl;
+    if (!urlTujuan) return;
     pendingSyncCountRef.current += 1;
     try {
       setSheetStatus('loading');
-      await sheetFetch(cmsTeks.appsScriptUrl, {
+      await sheetFetch(urlTujuan, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // hindari CORS preflight di Apps Script
         body: JSON.stringify({ sheet: sheetName, data })
@@ -1598,7 +1599,7 @@ export default function IuranWargaRTApp() {
         infoPengumumanList: (teksBaru.infoPengumumanList || []).join('|'),
         daftarBlokRumahList: (teksBaru.daftarBlokRumahList || []).join('|'),
         daftarNomorRumahList: (teksBaru.daftarNomorRumahList || []).join('|'),
-      }]);
+      }], teksBaru.appsScriptUrl);
     }
     showToast('Seluruh konten website berhasil disimpan & langsung tersinkron ke semua akun warga!');
   };
@@ -3752,6 +3753,12 @@ export default function IuranWargaRTApp() {
                 {/* USER INTERFACE VIEW */}
                 {role === 'user' && (
                   <div className="space-y-6 anim-fade">
+                    {isSimulatedSession && (
+                      <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-xs font-semibold leading-relaxed flex items-start gap-2">
+                        <span className="text-base leading-none">🧪</span>
+                        <span><strong>Ini hanya simulasi akun.</strong> Seluruh data di Dashboard ini adalah contoh tampilan, bukan data asli. Hanya akun warga yang sudah resmi terdaftar &amp; login yang akan terkoneksi dengan data real dari Google Sheets.</span>
+                      </div>
+                    )}
                     <div className="bg-white p-5 rounded-2xl border flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <h2 className="text-sm font-black text-slate-900">Assalamu'alaikum, {activeUserSession.nama} 👋</h2>
@@ -4256,13 +4263,18 @@ export default function IuranWargaRTApp() {
                   <div>
                     <h3 className="text-sm font-black text-slate-900">Daftar Blok Rumah RT</h3>
                     <p className="text-xs text-slate-400">
-                      {role === 'user' ? `Menampilkan informasi internal ${activeUserSession.kelompok} saja.` : 'Menampilkan seluruh database kelompok beserta status untuk pengurus.'}
+                      {role === 'user' ? 'Menampilkan data keluarga Anda saja.' : 'Menampilkan seluruh database kelompok beserta status untuk pengurus.'}
                     </p>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-xs font-semibold">
                     {kelompokList.filter(k => role === 'admin' || activeUserSession.kelompok === k.nama).map(k => {
-                      const anggotaKelompok = members.filter(m => m.kelompok === k.nama);
+                      // Untuk role user (akun warga), hanya tampilkan keluarganya sendiri -
+                      // BUKAN seluruh KK lain yang ada di blok yang sama (privasi warga lain).
+                      // Admin/Bendahara tetap melihat seluruh KK dalam blok tersebut.
+                      const anggotaKelompok = role === 'admin'
+                        ? members.filter(m => m.kelompok === k.nama)
+                        : members.filter(m => m.id === activeUserSession.id);
                       const rekapUsia = getRekapKategoriUsia(anggotaKelompok);
                       const totalJiwa = anggotaKelompok.length + anggotaKelompok.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
                       return (
