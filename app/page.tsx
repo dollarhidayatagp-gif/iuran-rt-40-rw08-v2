@@ -3693,11 +3693,11 @@ export default function IuranWargaRTApp() {
               // maupun akun user (warga) - user hanya tidak melihat tombol "Lihat
               // Rincian" & progress bar (dua fitur itu tetap khusus Admin).
               const perBlok = perBlokSemua;
-              const wargaTerbaru = dataWarga.slice(-5).reverse();
-              // Warga Keluar: Admin lihat semua blok, akun user (warga) hanya
-              // lihat warga keluar dari bloknya sendiri - otomatis konek dengan
-              // data yang diisi Admin lewat Panel Kontrol Warga Keluar.
-              const wargaKeluarTampil = (role === 'admin' ? wargaKeluarList : wargaKeluarList.filter(w => w.blok === activeUserSession.kelompok)).slice(-5).reverse();
+              // Warga Terbaru & Warga Keluar: SEMUA data RT ditampilkan baik untuk
+              // Admin maupun akun user (warga) - supaya info warga masuk/keluar
+              // otomatis konek & terlihat oleh seluruh warga, bukan hanya blok sendiri.
+              const wargaTerbaru = members.slice(-5).reverse();
+              const wargaKeluarTampil = wargaKeluarList.slice(-5).reverse();
 
               return (
                 <div className="space-y-6">
@@ -4475,19 +4475,15 @@ export default function IuranWargaRTApp() {
                 <div className="bg-white p-6 rounded-2xl border shadow-xs space-y-6">
                   <div>
                     <h3 className="text-sm font-black text-slate-900">Daftar Blok Rumah RT</h3>
-                    <p className="text-xs text-slate-400">
-                      {role === 'user' ? 'Menampilkan data keluarga Anda saja.' : 'Menampilkan seluruh database kelompok beserta status untuk pengurus.'}
-                    </p>
+                    <p className="text-xs text-slate-400">Menampilkan seluruh database kelompok/blok beserta status, sama seperti tampilan pengurus.</p>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-xs font-semibold">
-                    {kelompokList.filter(k => role === 'admin' || activeUserSession.kelompok === k.nama).map(k => {
-                      // Untuk role user (akun warga), hanya tampilkan keluarganya sendiri -
-                      // BUKAN seluruh KK lain yang ada di blok yang sama (privasi warga lain).
-                      // Admin/Bendahara tetap melihat seluruh KK dalam blok tersebut.
-                      const anggotaKelompok = role === 'admin'
-                        ? members.filter(m => m.kelompok === k.nama)
-                        : members.filter(m => m.id === activeUserSession.id);
+                    {kelompokList.map(k => {
+                      // Rekap Blok Rumah sekarang SAMA untuk Admin maupun akun user
+                      // (warga) - menampilkan seluruh KK di tiap blok, bukan hanya
+                      // keluarga sendiri, supaya warga bisa lihat data seluruh RT.
+                      const anggotaKelompok = members.filter(m => m.kelompok === k.nama);
                       const rekapUsia = getRekapKategoriUsia(anggotaKelompok);
                       const totalJiwa = anggotaKelompok.length + anggotaKelompok.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
                       return (
