@@ -1224,7 +1224,7 @@ export default function IuranWargaRTApp() {
   // handleUserMendaftar) - warga sering lupa mengisi data dirinya sendiri
   // (kepala keluarga) & langsung ke istri/anak, jadi baris pertama kita kunci
   // sebagai Kepala Keluarga supaya tidak pernah terlewat lagi.
-  const HUBUNGAN_KELUARGA_LIST = ['Kepala Keluarga', 'Suami', 'Istri', 'Anak ke-1', 'Anak ke-2', 'Anak ke-3', 'Anak ke-4', 'Anak ke-5'];
+  const HUBUNGAN_KELUARGA_LIST = ['Kepala Keluarga', 'Suami', 'Istri', 'Anak ke-1', 'Anak ke-2', 'Anak ke-3', 'Anak ke-4', 'Anak ke-5', 'Mertua', 'Menantu', 'Saudara', 'Sepupu', 'Ipar', 'Paman', 'Bibi', 'Lainnya (Teman dll)'];
   // Pilihan hubungan untuk baris TAMBAHAN (istri/anak/dst) setelah baris
   // Kepala Keluarga yang sudah dikunci di awal form pendaftaran - sengaja
   // tidak menyertakan "Kepala Keluarga" lagi supaya tidak dobel per KK.
