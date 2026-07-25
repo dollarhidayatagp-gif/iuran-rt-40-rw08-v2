@@ -1098,6 +1098,12 @@ export default function IuranWargaRTApp() {
   // yang sudah ada (sebelumnya nomor hanya bisa dibuat otomatis).
   const [editingKelompokId, setEditingKelompokId] = useState(null);
   const [riwayatPindahKelompok, setRiwayatPindahKelompok] = useState([]);
+  // NAMA BLOK YANG SEDANG DIBUKA RINCIANNYA di menu "Informasi Warga" (khusus
+  // Admin) - saat admin klik "Lihat Rincian" pada salah satu blok di
+  // "Distribusi Warga per Blok", muncul daftar Anggota Keluarga tiap KK di
+  // blok tersebut (format sama seperti tabel "Anggota Keluarga" akun user).
+  // null = belum ada blok yang dibuka rinciannya.
+  const [rincianBlokTerbuka, setRincianBlokTerbuka] = useState(null);
 
   const getKelompokInfo = (namaKelompok) => kelompokList.find(k => k.nama === namaKelompok);
 
@@ -1509,6 +1515,64 @@ export default function IuranWargaRTApp() {
     if (!y || !m || !d) return isoDate;
     const namaBulanLengkap = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
     return `${d} ${namaBulanLengkap[m - 1]} ${y}`;
+  };
+
+  // HELPER: FORMAT TANGGAL SERAGAM UNTUK LAPORAN KAS & AGENDA KEGIATAN
+  // -----------------------------------------------------------
+  // Dipakai supaya tampilan tanggal SAMA PERSIS di semua tempat (Laporan Kas,
+  // Agenda Kegiatan) baik di akun user maupun admin, contoh hasil: "28 July 2026".
+  // Bisa menerima berbagai bentuk input yang mungkin ada di data:
+  //  - ISO dari <input type="date"> / Google Sheets: "2026-07-28"
+  //  - Format lama singkat: "11 Jul 2026" / "01 Jun 2026"
+  //  - Sudah berupa teks lain -> dikembalikan apa adanya (fallback aman)
+  // Juga otomatis menyaring "tanggal kosong" dari Google Sheets yang sering
+  // terbaca sebagai epoch 1899-12-30 (bug umum saat sel tanggal kosong/rusak),
+  // supaya tidak tampil tanggal aneh ke warga.
+  const NAMA_BULAN_EN = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const PETA_BULAN_KE_INDEX = {
+    jan: 0, januari: 0, january: 0,
+    feb: 1, februari: 1, february: 1,
+    mar: 2, maret: 2, march: 2,
+    apr: 3, april: 3,
+    mei: 4, may: 4,
+    jun: 5, juni: 5, june: 5,
+    jul: 6, juli: 6, july: 6,
+    agu: 7, agt: 7, agustus: 7, aug: 7, august: 7,
+    sep: 8, sept: 8, september: 8,
+    okt: 9, oktober: 9, oct: 9, october: 9,
+    nov: 10, november: 10,
+    des: 11, desember: 11, dec: 11, december: 11,
+  };
+  const formatTanggalLaporan = (input) => {
+    if (!input) return '-';
+    if (input instanceof Date) {
+      if (isNaN(input.getTime())) return '-';
+      const y = input.getFullYear(), m = input.getMonth() + 1, d = input.getDate();
+      if (y < 1950) return '-'; // saring bug epoch Google Sheets (1899-12-30)
+      return `${d} ${NAMA_BULAN_EN[m - 1]} ${y}`;
+    }
+    const teks = String(input).trim();
+    if (!teks) return '-';
+    let y, m, d;
+    const cocokIso = teks.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const cocokIndo = teks.match(/^(\d{1,2})\s+([A-Za-zÀ-ÿ]+)\s+(\d{4})/);
+    if (cocokIso) {
+      y = Number(cocokIso[1]); m = Number(cocokIso[2]); d = Number(cocokIso[3]);
+    } else if (cocokIndo) {
+      d = Number(cocokIndo[1]);
+      const idxBulan = PETA_BULAN_KE_INDEX[cocokIndo[2].toLowerCase()];
+      m = idxBulan !== undefined ? idxBulan + 1 : NaN;
+      y = Number(cocokIndo[3]);
+    }
+    if (!y || !m || !d || y < 1950) return teks; // tidak dikenali -> tampilkan apa adanya
+    return `${d} ${NAMA_BULAN_EN[m - 1]} ${y}`;
+  };
+  // HELPER: GABUNGAN TANGGAL + JAM UNTUK AGENDA KEGIATAN, format seragam:
+  // "28 July 2026 Pukul 20:00 WIB". Kalau jam kosong, tampilkan tanggal saja.
+  const formatAgendaLengkap = (tanggal, jam) => {
+    const tgl = formatTanggalLaporan(tanggal);
+    if (!jam) return tgl;
+    return `${tgl} Pukul ${jam} WIB`;
   };
 
   // HELPER: PISAHKAN "TANGGAL & JAM PELUNASAN" MENJADI DUA BAGIAN TERPISAH
@@ -3149,7 +3213,7 @@ export default function IuranWargaRTApp() {
                       )}
                     </div>
                     <div className="p-5 text-xs">
-                      <p className="text-slate-400 font-bold text-[11px]">{agendaUtama.tanggal}{agendaUtama.jam ? ` • ${agendaUtama.jam} WIB` : ''}</p>
+                      <p className="text-slate-400 font-bold text-[11px]">{formatAgendaLengkap(agendaUtama.tanggal, agendaUtama.jam)}</p>
                       <h4 className="text-slate-900 font-black text-base mt-1">{agendaUtama.judul}</h4>
                       {(agendaUtama.tempat || agendaUtama.pembicara) && (
                         <p className="text-emerald-700 font-bold mt-1.5 text-[11px]">{agendaUtama.tempat}{agendaUtama.tempat && agendaUtama.pembicara ? ' • ' : ''}{agendaUtama.pembicara ? `Bersama: ${agendaUtama.pembicara}` : ''}</p>
@@ -3177,7 +3241,7 @@ export default function IuranWargaRTApp() {
                         )}
                       </div>
                       <div className="p-3 text-xs">
-                        <p className="text-slate-400 font-bold text-[10px]">{k.tanggal}{k.jam ? ` • ${k.jam} WIB` : ''}</p>
+                        <p className="text-slate-400 font-bold text-[10px]">{formatAgendaLengkap(k.tanggal, k.jam)}</p>
                         <h4 className="text-slate-900 font-bold mt-0.5">{k.judul}</h4>
                         {(k.tempat || k.pembicara) && (
                           <p className="text-emerald-700 font-bold mt-1 text-[10px]">{k.tempat}{k.tempat && k.pembicara ? ' • ' : ''}{k.pembicara ? `Pembicara: ${k.pembicara}` : ''}</p>
@@ -3353,7 +3417,7 @@ export default function IuranWargaRTApp() {
                     <tbody>
                       {getRiwayatKasRtDenganSaldo().map(t => (
                         <tr key={t.id} className="border-b border-slate-50">
-                          <td className="py-1.5 px-2 text-slate-500 whitespace-nowrap">{t.tanggal}</td>
+                          <td className="py-1.5 px-2 text-slate-500 whitespace-nowrap">{formatTanggalLaporan(t.tanggal)}</td>
                           <td className="py-1.5 px-2 text-slate-700 font-semibold">{t.keterangan}</td>
                           <td className="py-1.5 px-2 text-right font-bold text-emerald-700">{t.jenis === 'Masuk' ? `Rp${Number(t.nominal).toLocaleString('id-ID')}` : '-'}</td>
                           <td className="py-1.5 px-2 text-right font-bold text-rose-600">{t.jenis === 'Keluar' ? `Rp${Number(t.nominal).toLocaleString('id-ID')}` : '-'}</td>
@@ -3589,7 +3653,10 @@ export default function IuranWargaRTApp() {
                 const jumlahJiwa = jumlahKK + anggotaBlokIni.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
                 return { ...k, jumlahKK, jumlahJiwa };
               });
-              const perBlok = role === 'admin' ? perBlokSemua : perBlokSemua.filter(k => k.nama === activeUserSession.kelompok);
+              // Distribusi Warga per Blok: SEMUA blok ditampilkan baik untuk Admin
+              // maupun akun user (warga) - user hanya tidak melihat tombol "Lihat
+              // Rincian" & progress bar (dua fitur itu tetap khusus Admin).
+              const perBlok = perBlokSemua;
               const wargaTerbaru = dataWarga.slice(-5).reverse();
               // Warga Keluar: Admin lihat semua blok, akun user (warga) hanya
               // lihat warga keluar dari bloknya sendiri - otomatis konek dengan
@@ -3616,11 +3683,11 @@ export default function IuranWargaRTApp() {
                       <span className="text-2xl font-black text-sky-700 block mt-1">{totalJiwa}</span>
                     </div>
                     <div className="bg-white p-4 rounded-2xl border shadow-xs">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Tanggungan Laki-laki</span>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Laki-laki</span>
                       <span className="text-2xl font-black text-indigo-700 block mt-1">{jmlLakiTanggungan}</span>
                     </div>
                     <div className="bg-white p-4 rounded-2xl border shadow-xs">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Tanggungan Perempuan</span>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Perempuan</span>
                       <span className="text-2xl font-black text-rose-600 block mt-1">{jmlPerempuanTanggungan}</span>
                     </div>
                   </div>
@@ -3682,11 +3749,14 @@ export default function IuranWargaRTApp() {
                       data Anggota (Google Sheet) tanpa perlu input manual. */}
                   <div className="bg-white p-5 rounded-2xl border shadow-xs">
                     <h4 className="text-xs font-extrabold text-slate-900 uppercase mb-3">
-                      {role === 'admin' ? 'Distribusi Warga per Blok' : `Informasi Warga Blok ${activeUserSession.kelompok}`}
+                      Distribusi Warga per Blok
                     </h4>
                     <div className="space-y-3">
                       {perBlok.map(k => {
                         const persen = totalKK > 0 ? Math.round((k.jumlahKK / totalKK) * 100) : 0;
+                        const rincianTerbuka = rincianBlokTerbuka === k.nama;
+                        // Daftar KK & anggota keluarga di blok ini (khusus untuk rincian admin)
+                        const kkDiBlokIni = role === 'admin' ? members.filter(m => m.kelompok === k.nama) : [];
                         return (
                           <div key={k.id} className="text-[11px] font-semibold">
                             <div className="flex justify-between items-center mb-1">
@@ -3694,11 +3764,66 @@ export default function IuranWargaRTApp() {
                               <span className="flex items-center gap-2">
                                 <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-lg font-black">{k.jumlahKK} KK</span>
                                 <span className="bg-sky-50 text-sky-700 px-2 py-0.5 rounded-lg font-black">{k.jumlahJiwa} Jiwa</span>
+                                {role === 'admin' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setRincianBlokTerbuka(rincianTerbuka ? null : k.nama)}
+                                    className={`px-2 py-0.5 rounded-lg font-black text-[10px] transition-colors ${rincianTerbuka ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                  >
+                                    {rincianTerbuka ? 'Tutup' : 'Lihat Rincian'}
+                                  </button>
+                                )}
                               </span>
                             </div>
                             {role === 'admin' && (
                               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                                 <div className="bg-emerald-600 h-full transition-all duration-500" style={{ width: `${persen}%` }}></div>
+                              </div>
+                            )}
+
+                            {/* RINCIAN ANGGOTA KELUARGA PER KK DI BLOK INI (ADMIN, KLIK "LIHAT RINCIAN") */}
+                            {role === 'admin' && rincianTerbuka && (
+                              <div className="mt-3 mb-1 space-y-3 bg-slate-50 border border-slate-200 rounded-xl p-3 anim-fade">
+                                {kkDiBlokIni.length === 0 && (
+                                  <p className="text-slate-400 italic text-[11px]">Belum ada KK tercatat di blok ini.</p>
+                                )}
+                                {kkDiBlokIni.map(kk => (
+                                  <div key={kk.id} className="bg-white border rounded-xl p-3">
+                                    <p className="text-[11px] font-black text-slate-900">{kk.nama} <span className="font-normal text-slate-400">— {kk.nomorRumah || kk.kelompok} • Status Rumah: {kk.statusRumah || '-'}</span></p>
+                                    <div className="overflow-x-auto mt-2">
+                                      <table className="w-full text-[10px] font-semibold">
+                                        <thead>
+                                          <tr className="text-slate-400 uppercase text-[9px] text-left border-b">
+                                            <th className="py-1.5 pr-2">Nama</th>
+                                            <th className="py-1.5 pr-2">Hubungan</th>
+                                            <th className="py-1.5 pr-2">Jenis Kelamin</th>
+                                            <th className="py-1.5 pr-2">Tanggal Lahir</th>
+                                            <th className="py-1.5 pr-2">Usia</th>
+                                            <th className="py-1.5 pr-2">Kategori</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {(kk.anggotaKeluarga || []).map(a => {
+                                            const usia = hitungUsia(a.tanggalLahir);
+                                            return (
+                                              <tr key={a.id} className="border-b last:border-0">
+                                                <td className="py-1.5 pr-2 font-black text-slate-900">{a.nama}</td>
+                                                <td className="py-1.5 pr-2 text-emerald-700 font-bold">{a.hubungan || '-'}</td>
+                                                <td className="py-1.5 pr-2 text-slate-500">{a.jenisKelamin}</td>
+                                                <td className="py-1.5 pr-2 text-slate-500">{a.tanggalLahir}</td>
+                                                <td className="py-1.5 pr-2 text-slate-700 font-bold">{usia !== null ? `${usia} tahun` : '-'}</td>
+                                                <td className="py-1.5 pr-2"><span className="px-2 py-0.5 rounded text-[9px] font-black bg-emerald-100 text-emerald-700">{kategoriUsia(usia)}</span></td>
+                                              </tr>
+                                            );
+                                          })}
+                                          {(kk.anggotaKeluarga || []).length === 0 && (
+                                            <tr><td colSpan={6} className="py-2 text-center text-slate-400 italic">Belum ada anggota keluarga tercatat.</td></tr>
+                                          )}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
                             )}
                           </div>
@@ -3707,6 +3832,58 @@ export default function IuranWargaRTApp() {
                       {perBlok.length === 0 && <p className="text-slate-400 italic text-[11px]">{role === 'admin' ? 'Belum ada blok terdaftar.' : 'Data blok Anda belum terdaftar.'}</p>}
                     </div>
                   </div>
+
+                  {/* DAFTAR ANGGOTA KELUARGA SELURUH KK (KHUSUS ADMIN) - format tabel
+                      sama seperti tab "Anggota Keluarga" di akun user, supaya Admin bisa
+                      lihat seluruh anggota keluarga tiap KK dalam satu halaman ini. */}
+                  {role === 'admin' && (
+                    <div className="bg-white p-5 rounded-2xl border shadow-xs">
+                      <h4 className="text-xs font-extrabold text-slate-900 uppercase mb-3">👨‍👩‍👧‍👦 Informasi Keluarga (Seluruh KK)</h4>
+                      <div className="space-y-4">
+                        {dataWarga.map(kk => (
+                          <div key={kk.id} className="border rounded-xl p-3">
+                            <div className="flex justify-between items-center flex-wrap gap-2 mb-2">
+                              <p className="text-[11px] font-black text-slate-900">{kk.nama} <span className="font-normal text-slate-400">— {kk.nomorRumah || kk.kelompok} • Status Rumah: {kk.statusRumah || '-'}</span></p>
+                              <span className="text-[10px] font-bold text-slate-400">{(kk.anggotaKeluarga || []).length} anggota tercatat</span>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-[10px] font-semibold">
+                                <thead>
+                                  <tr className="text-slate-400 uppercase text-[9px] text-left border-b">
+                                    <th className="py-1.5 pr-2">Nama</th>
+                                    <th className="py-1.5 pr-2">Hubungan</th>
+                                    <th className="py-1.5 pr-2">Jenis Kelamin</th>
+                                    <th className="py-1.5 pr-2">Tanggal Lahir</th>
+                                    <th className="py-1.5 pr-2">Usia</th>
+                                    <th className="py-1.5 pr-2">Kategori</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {(kk.anggotaKeluarga || []).map(a => {
+                                    const usia = hitungUsia(a.tanggalLahir);
+                                    return (
+                                      <tr key={a.id} className="border-b last:border-0">
+                                        <td className="py-1.5 pr-2 font-black text-slate-900">{a.nama}</td>
+                                        <td className="py-1.5 pr-2 text-emerald-700 font-bold">{a.hubungan || '-'}</td>
+                                        <td className="py-1.5 pr-2 text-slate-500">{a.jenisKelamin}</td>
+                                        <td className="py-1.5 pr-2 text-slate-500">{a.tanggalLahir}</td>
+                                        <td className="py-1.5 pr-2 text-slate-700 font-bold">{usia !== null ? `${usia} tahun` : '-'}</td>
+                                        <td className="py-1.5 pr-2"><span className="px-2 py-0.5 rounded text-[9px] font-black bg-emerald-100 text-emerald-700">{kategoriUsia(usia)}</span></td>
+                                      </tr>
+                                    );
+                                  })}
+                                  {(kk.anggotaKeluarga || []).length === 0 && (
+                                    <tr><td colSpan={6} className="py-2 text-center text-slate-400 italic">Belum ada anggota keluarga tercatat.</td></tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ))}
+                        {dataWarga.length === 0 && <p className="text-slate-400 italic text-[11px]">Belum ada data KK tercatat.</p>}
+                      </div>
+                    </div>
+                  )}
 
                   {/* WARGA TERBARU & WARGA KELUAR (dibagi 2 kolom berdampingan) */}
                   <div className="grid sm:grid-cols-2 gap-4">
@@ -3817,7 +3994,7 @@ export default function IuranWargaRTApp() {
                           {kegiatanList.length > 0 && (
                             <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-2.5">
                               <p className="text-emerald-800 font-black text-[10px]">{kegiatanList[kegiatanList.length - 1].judul}</p>
-                              <p className="text-emerald-700 font-semibold text-[10px] mt-0.5">{kegiatanList[kegiatanList.length - 1].tanggal}{kegiatanList[kegiatanList.length - 1].jam ? `, ${kegiatanList[kegiatanList.length - 1].jam} WIB` : ''} — {kegiatanList[kegiatanList.length - 1].tempat}</p>
+                              <p className="text-emerald-700 font-semibold text-[10px] mt-0.5">{formatAgendaLengkap(kegiatanList[kegiatanList.length - 1].tanggal, kegiatanList[kegiatanList.length - 1].jam)} — {kegiatanList[kegiatanList.length - 1].tempat}</p>
                             </div>
                           )}
                         </div>
@@ -4041,7 +4218,7 @@ export default function IuranWargaRTApp() {
                         {kegiatanList.length > 0 && (
                           <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-2.5">
                             <p className="text-emerald-800 font-black text-[10px]">{kegiatanList[kegiatanList.length - 1].judul}</p>
-                            <p className="text-emerald-700 font-semibold text-[10px] mt-0.5">{kegiatanList[kegiatanList.length - 1].tanggal}{kegiatanList[kegiatanList.length - 1].jam ? `, ${kegiatanList[kegiatanList.length - 1].jam} WIB` : ''} — {kegiatanList[kegiatanList.length - 1].tempat}</p>
+                            <p className="text-emerald-700 font-semibold text-[10px] mt-0.5">{formatAgendaLengkap(kegiatanList[kegiatanList.length - 1].tanggal, kegiatanList[kegiatanList.length - 1].jam)} — {kegiatanList[kegiatanList.length - 1].tempat}</p>
                           </div>
                         )}
                       </div>
@@ -4543,7 +4720,7 @@ export default function IuranWargaRTApp() {
                         )}
                       </div>
                       <div className="p-5 text-xs">
-                        <p className="text-slate-400 font-bold text-[11px]">{agendaUtama.tanggal}{agendaUtama.jam ? ` • ${agendaUtama.jam} WIB` : ''}</p>
+                        <p className="text-slate-400 font-bold text-[11px]">{formatAgendaLengkap(agendaUtama.tanggal, agendaUtama.jam)}</p>
                         <h4 className="text-slate-900 font-black text-base mt-1">{agendaUtama.judul}</h4>
                         {(agendaUtama.tempat || agendaUtama.pembicara) && (
                           <p className="text-emerald-700 font-bold mt-1.5 text-[11px]">{agendaUtama.tempat}{agendaUtama.tempat && agendaUtama.pembicara ? ' • ' : ''}{agendaUtama.pembicara ? `Bersama: ${agendaUtama.pembicara}` : ''}</p>
@@ -4570,7 +4747,7 @@ export default function IuranWargaRTApp() {
                           )}
                         </div>
                         <div className="p-3 text-xs">
-                          <p className="text-slate-400 font-bold text-[10px]">{k.tanggal}{k.jam ? ` • ${k.jam} WIB` : ''}</p>
+                          <p className="text-slate-400 font-bold text-[10px]">{formatAgendaLengkap(k.tanggal, k.jam)}</p>
                           <h4 className="text-slate-900 font-bold mt-0.5">{k.judul}</h4>
                           {(k.tempat || k.pembicara) && (
                             <p className="text-emerald-700 font-bold mt-1 text-[10px]">{k.tempat}{k.tempat && k.pembicara ? ' • ' : ''}{k.pembicara ? `Pembicara: ${k.pembicara}` : ''}</p>
@@ -4614,7 +4791,7 @@ export default function IuranWargaRTApp() {
                           <div className="min-w-0">
                             <span className="inline-block text-[9px] font-black uppercase tracking-wide bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full mb-1">{r.kategori}</span>
                             <p className="text-slate-900 font-bold">{r.keterangan}</p>
-                            <p className="text-slate-400">{r.tanggal} • Rp {r.nominal.toLocaleString('id-ID')} • Dicatat oleh {r.dicatatOleh}</p>
+                            <p className="text-slate-400">{formatTanggalLaporan(r.tanggal)} • Rp {r.nominal.toLocaleString('id-ID')} • Dicatat oleh {r.dicatatOleh}</p>
                           </div>
                           {r.buktiUrl ? (
                             <button onClick={() => setPreviewLampiran({ judul: r.keterangan, url: r.buktiUrl, namaFile: r.buktiNamaFile, tipe: 'gambar' })} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded-lg shrink-0">📷 Lihat Bukti</button>
@@ -4758,7 +4935,7 @@ export default function IuranWargaRTApp() {
                         <div className="min-w-0">
                           <span className="inline-block text-[9px] font-black uppercase tracking-wide bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full mb-1">{r.kategori}</span>
                           <p className="text-slate-900 font-bold">{r.keterangan}</p>
-                          <p className="text-slate-400">{r.tanggal} • Rp {r.nominal.toLocaleString('id-ID')} • Target: {r.kelompok}</p>
+                          <p className="text-slate-400">{formatTanggalLaporan(r.tanggal)} • Rp {r.nominal.toLocaleString('id-ID')} • Target: {r.kelompok}</p>
                         </div>
                         <div className="flex gap-2 shrink-0">
                           {r.buktiUrl && (
@@ -5404,7 +5581,7 @@ export default function IuranWargaRTApp() {
                       <div key={t.id} className="flex items-center gap-3 p-2.5 bg-slate-50 border rounded-xl">
                         <div className="flex-1 min-w-0">
                           <p className="font-black text-slate-900 truncate">{t.keterangan}</p>
-                          <p className="text-[10px] text-slate-400">{t.tanggal} • Saldo setelah: Rp{t.saldoSetelah.toLocaleString('id-ID')}</p>
+                          <p className="text-[10px] text-slate-400">{formatTanggalLaporan(t.tanggal)} • Saldo setelah: Rp{t.saldoSetelah.toLocaleString('id-ID')}</p>
                         </div>
                         <span className={`font-bold text-[11px] shrink-0 ${t.jenis === 'Masuk' ? 'text-emerald-700' : 'text-rose-600'}`}>{t.jenis === 'Masuk' ? '+' : '-'}Rp{Number(t.nominal).toLocaleString('id-ID')}</span>
                         <button type="button" onClick={() => handleEditRiwayatKasRt(t)} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded text-[10px] font-bold shrink-0">Edit</button>
@@ -5476,7 +5653,7 @@ export default function IuranWargaRTApp() {
                       {agendaUtama.foto ? <img loading="lazy" decoding="async" src={agendaUtama.foto} alt={agendaUtama.judul} className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} /> : <span className="text-[10px] text-slate-400 font-bold">Belum ada foto agenda utama</span>}
                     </div>
                     <div className="p-3">
-                      <p className="text-slate-400 font-bold text-[10px]">{agendaUtama.tanggal}{agendaUtama.jam ? ` • ${agendaUtama.jam} WIB` : ''}</p>
+                      <p className="text-slate-400 font-bold text-[10px]">{formatAgendaLengkap(agendaUtama.tanggal, agendaUtama.jam)}</p>
                       <h4 className="text-slate-900 font-bold text-[12px] mt-0.5">{agendaUtama.judul || 'Belum ada agenda utama'}</h4>
                     </div>
                   </div>
@@ -5512,7 +5689,7 @@ export default function IuranWargaRTApp() {
                           {k.foto ? <img loading="lazy" decoding="async" src={k.foto} alt={k.judul} className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} /> : <span className="text-[10px] text-slate-400 font-bold">Belum ada foto</span>}
                         </div>
                         <div className="p-3">
-                          <p className="text-slate-400 font-bold text-[10px]">{k.tanggal}{k.jam ? ` • ${k.jam} WIB` : ''}</p>
+                          <p className="text-slate-400 font-bold text-[10px]">{formatAgendaLengkap(k.tanggal, k.jam)}</p>
                           <h4 className="text-slate-900 font-bold text-[11px] mt-0.5">{k.judul}</h4>
                           {(k.tempat || k.pembicara) && (
                             <p className="text-emerald-700 font-bold mt-1 text-[10px] leading-relaxed">{k.tempat}{k.tempat && k.pembicara ? ' • ' : ''}{k.pembicara ? `Pembicara: ${k.pembicara}` : ''}</p>
