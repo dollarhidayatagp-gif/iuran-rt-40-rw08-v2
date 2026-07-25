@@ -4501,10 +4501,15 @@ export default function IuranWargaRTApp() {
                             <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-lg font-black flex-1 text-center">{anggotaKelompok.length} KK</span>
                             <span className="bg-sky-50 text-sky-700 px-2 py-1 rounded-lg font-black flex-1 text-center">{totalJiwa} Jiwa</span>
                           </div>
-                          <ul className="space-y-1 text-slate-700">
-                            {anggotaKelompok.map((m, i) => <li key={i}>• {m.nama} <span className="text-slate-400 font-normal">({m.statusRumah || '-'}, {(m.anggotaKeluarga || []).length} anggota keluarga)</span></li>)}
-                            {anggotaKelompok.length === 0 && <li className="text-slate-400 italic">Belum ada anggota</li>}
-                          </ul>
+                          {/* DAFTAR NAMA KK - KHUSUS ADMIN. Akun user hanya lihat
+                              jumlah (KK & Jiwa di atas), tanpa nama warga, supaya
+                              privasi data warga lain tetap terjaga. */}
+                          {role === 'admin' && (
+                            <ul className="space-y-1 text-slate-700">
+                              {anggotaKelompok.map((m, i) => <li key={i}>• {m.nama} <span className="text-slate-400 font-normal">({m.statusRumah || '-'}, {(m.anggotaKeluarga || []).length} anggota keluarga)</span></li>)}
+                              {anggotaKelompok.length === 0 && <li className="text-slate-400 italic">Belum ada anggota</li>}
+                            </ul>
+                          )}
                           {/* KATEGORI USIA OTOMATIS (dihitung dari seluruh anggota keluarga di blok ini) */}
                           <div className="pt-2 border-t">
                             <span className="text-[9px] font-black text-slate-400 uppercase tracking-wide block mb-1.5">Rekap Usia Otomatis</span>
