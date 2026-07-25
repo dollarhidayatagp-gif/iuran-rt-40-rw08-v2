@@ -1507,13 +1507,25 @@ export default function IuranWargaRTApp() {
     return pass;
   };
 
-  // HELPER: UBAH NILAI <input type="date"> (YYYY-MM-DD) MENJADI FORMAT TANGGAL INDONESIA
-  // Contoh: '2026-07-11' -> '11 Juli 2026'
-  const formatTanggalIndo = (isoDate) => {
-    if (!isoDate) return '-';
-    const [y, m, d] = isoDate.split('-').map(Number);
-    if (!y || !m || !d) return isoDate;
+  // HELPER: UBAH TANGGAL (ISO "2026-07-11" ATAU FORMAT SINGKAT "11 Jul 2026")
+  // MENJADI FORMAT TANGGAL INDONESIA LENGKAP. Contoh: -> '11 Juli 2026'.
+  const formatTanggalIndo = (input) => {
+    if (!input) return '-';
+    const teks = String(input).trim();
+    if (!teks) return '-';
     const namaBulanLengkap = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    let y, m, d;
+    const cocokIso = teks.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const cocokSingkat = teks.match(/^(\d{1,2})\s+([A-Za-zÀ-ÿ]+)\s+(\d{4})/);
+    if (cocokIso) {
+      y = Number(cocokIso[1]); m = Number(cocokIso[2]); d = Number(cocokIso[3]);
+    } else if (cocokSingkat) {
+      d = Number(cocokSingkat[1]);
+      const idxBulan = PETA_BULAN_KE_INDEX[cocokSingkat[2].toLowerCase()];
+      m = idxBulan !== undefined ? idxBulan + 1 : NaN;
+      y = Number(cocokSingkat[3]);
+    }
+    if (!y || !m || !d || y < 1950) return teks; // tidak dikenali -> tampilkan apa adanya
     return `${d} ${namaBulanLengkap[m - 1]} ${y}`;
   };
 
@@ -3920,7 +3932,7 @@ export default function IuranWargaRTApp() {
                               <span className="text-slate-900 font-black block truncate">{m.nama}</span>
                               <span className="text-slate-400 font-normal">{m.nomorRumah || m.kelompok}</span>
                             </div>
-                            <span className="text-slate-400 shrink-0">{m.bergabung}</span>
+                            <span className="text-slate-400 shrink-0">{formatTanggalIndo(m.bergabung)}</span>
                           </li>
                         ))}
                         {wargaTerbaru.length === 0 && <li className="py-2 text-slate-400 italic">Belum ada data warga.</li>}
@@ -3937,7 +3949,7 @@ export default function IuranWargaRTApp() {
                               <span className="text-slate-900 font-black block truncate">{w.nama}</span>
                               <span className="text-slate-400 font-normal">{w.blok}</span>
                             </div>
-                            <span className="text-slate-400 shrink-0">{w.tanggalKeluar}</span>
+                            <span className="text-slate-400 shrink-0">{formatTanggalIndo(w.tanggalKeluar)}</span>
                           </li>
                         ))}
                         {wargaKeluarTampil.length === 0 && <li className="py-2 text-slate-400 italic">Belum ada data warga keluar.</li>}
@@ -5263,7 +5275,7 @@ export default function IuranWargaRTApp() {
                       <div key={w.id} className="p-3 bg-slate-50 rounded-xl border flex justify-between items-center flex-wrap gap-2">
                         <div>
                           <span className="text-sm font-black text-slate-900 block">{w.nama}</span>
-                          <span className="text-slate-400 font-normal">{w.blok} • Keluar: {w.tanggalKeluar}{w.keterangan ? ` • ${w.keterangan}` : ''}</span>
+                          <span className="text-slate-400 font-normal">{w.blok} • Keluar: {formatTanggalIndo(w.tanggalKeluar)}{w.keterangan ? ` • ${w.keterangan}` : ''}</span>
                         </div>
                         <div className="flex gap-2">
                           <button onClick={() => handleEditWargaKeluar(w)} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded text-[10px]">Edit</button>
