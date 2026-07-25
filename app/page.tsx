@@ -1567,12 +1567,36 @@ export default function IuranWargaRTApp() {
     if (!y || !m || !d || y < 1950) return teks; // tidak dikenali -> tampilkan apa adanya
     return `${d} ${NAMA_BULAN_EN[m - 1]} ${y}`;
   };
+  // HELPER: BERSIHKAN NILAI "JAM" AGENDA DARI BUG EPOCH GOOGLE SHEETS
+  // -----------------------------------------------------------
+  // Google Sheets menyimpan nilai WAKTU (jam) sebagai pecahan hari sejak
+  // tanggal dasar 30 Desember 1899. Kalau kolom "Jam" di Spreadsheet terbaca
+  // sebagai objek Date murni (bukan teks), hasilnya sering muncul sebagai
+  // "1899-12-30" (tanpa jam) atau "1899-12-30T12:30:00.000Z" (dengan jam).
+  // Fungsi ini mengenali pola tersebut dan mengembalikan jam bersih "12:30",
+  // supaya tidak pernah tampil "1899" ke warga.
+  const sanitizeJamAgenda = (jamMentah) => {
+    if (!jamMentah) return '';
+    const teks = String(jamMentah).trim();
+    if (!teks) return '';
+    // Sudah berupa jam wajar, contoh "19:30" / "07.00" -> pakai apa adanya.
+    if (/^\d{1,2}[.:]\d{2}$/.test(teks)) return teks.replace('.', ':');
+    // Format ISO lengkap dengan bagian jam, contoh "1899-12-30T12:30:00.000Z"
+    const cocokIso = teks.match(/T(\d{2}):(\d{2})/);
+    if (cocokIso) return `${cocokIso[1]}:${cocokIso[2]}`;
+    // Bug epoch tanpa "T", contoh "1899-12-30" -> ambil 2 segmen terakhir
+    // sebagai jam:menit ("12-30" -> "12:30").
+    const cocokEpoch = teks.match(/^1899-(\d{2})-(\d{2})/);
+    if (cocokEpoch) return `${cocokEpoch[1]}:${cocokEpoch[2]}`;
+    return teks;
+  };
   // HELPER: GABUNGAN TANGGAL + JAM UNTUK AGENDA KEGIATAN, format seragam:
   // "28 July 2026 Pukul 20:00 WIB". Kalau jam kosong, tampilkan tanggal saja.
   const formatAgendaLengkap = (tanggal, jam) => {
     const tgl = formatTanggalLaporan(tanggal);
-    if (!jam) return tgl;
-    return `${tgl} Pukul ${jam} WIB`;
+    const jamBersih = sanitizeJamAgenda(jam);
+    if (!jamBersih) return tgl;
+    return `${tgl} Pukul ${jamBersih} WIB`;
   };
 
   // HELPER: PISAHKAN "TANGGAL & JAM PELUNASAN" MENJADI DUA BAGIAN TERPISAH
@@ -3810,7 +3834,7 @@ export default function IuranWargaRTApp() {
                                                 <td className="py-1.5 pr-2 font-black text-slate-900">{a.nama}</td>
                                                 <td className="py-1.5 pr-2 text-emerald-700 font-bold">{a.hubungan || '-'}</td>
                                                 <td className="py-1.5 pr-2 text-slate-500">{a.jenisKelamin}</td>
-                                                <td className="py-1.5 pr-2 text-slate-500">{a.tanggalLahir}</td>
+                                                <td className="py-1.5 pr-2 text-slate-500">{formatTanggalIndo(a.tanggalLahir)}</td>
                                                 <td className="py-1.5 pr-2 text-slate-700 font-bold">{usia !== null ? `${usia} tahun` : '-'}</td>
                                                 <td className="py-1.5 pr-2"><span className="px-2 py-0.5 rounded text-[9px] font-black bg-emerald-100 text-emerald-700">{kategoriUsia(usia)}</span></td>
                                               </tr>
@@ -3866,7 +3890,7 @@ export default function IuranWargaRTApp() {
                                         <td className="py-1.5 pr-2 font-black text-slate-900">{a.nama}</td>
                                         <td className="py-1.5 pr-2 text-emerald-700 font-bold">{a.hubungan || '-'}</td>
                                         <td className="py-1.5 pr-2 text-slate-500">{a.jenisKelamin}</td>
-                                        <td className="py-1.5 pr-2 text-slate-500">{a.tanggalLahir}</td>
+                                        <td className="py-1.5 pr-2 text-slate-500">{formatTanggalIndo(a.tanggalLahir)}</td>
                                         <td className="py-1.5 pr-2 text-slate-700 font-bold">{usia !== null ? `${usia} tahun` : '-'}</td>
                                         <td className="py-1.5 pr-2"><span className="px-2 py-0.5 rounded text-[9px] font-black bg-emerald-100 text-emerald-700">{kategoriUsia(usia)}</span></td>
                                       </tr>
@@ -4550,7 +4574,7 @@ export default function IuranWargaRTApp() {
                                       <tr key={a.id} className="border-b last:border-0">
                                         <td className="py-1.5 pr-2 font-black text-slate-900">{a.nama}</td>
                                         <td className="py-1.5 pr-2 text-emerald-700 font-bold">{a.hubungan || '-'}</td>
-                                        <td className="py-1.5 pr-2 text-slate-500">{a.tanggalLahir}</td>
+                                        <td className="py-1.5 pr-2 text-slate-500">{formatTanggalIndo(a.tanggalLahir)}</td>
                                         <td className="py-1.5 pr-2 text-slate-700 font-bold">{usia !== null ? `${usia} tahun` : '-'}</td>
                                         <td className="py-1.5 pr-2"><span className="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-700">{kategoriUsia(usia)}</span></td>
                                       </tr>
@@ -4619,7 +4643,7 @@ export default function IuranWargaRTApp() {
                                 <td className="py-2.5 pr-2 font-black text-slate-900">{a.nama}</td>
                                 <td className="py-2.5 pr-2 text-emerald-700 font-bold">{a.hubungan || '-'}</td>
                                 <td className="py-2.5 pr-2 text-slate-500">{a.jenisKelamin}</td>
-                                <td className="py-2.5 pr-2 text-slate-500">{a.tanggalLahir}</td>
+                                <td className="py-2.5 pr-2 text-slate-500">{formatTanggalIndo(a.tanggalLahir)}</td>
                                 <td className="py-2.5 pr-2 text-slate-700 font-bold">{usia !== null ? `${usia} tahun` : '-'}</td>
                                 <td className="py-2.5 pr-2"><span className="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-700">{kategoriUsia(usia)}</span></td>
                                 <td className="py-2.5 pr-2 flex gap-2">
