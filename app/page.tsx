@@ -865,7 +865,7 @@ export default function IuranWargaRTApp() {
       // (lihat catatan perbaikan bug yang sama di dataStruktur di bawah) -
       // dataKegiatan & dataKelompok juga dikelola admin lewat tambah/hapus,
       // jadi kalau memang dikosongkan total di Sheet, tampilan harus ikut kosong.
-      if (Array.isArray(dataKegiatan)) setKegiatanList(dataKegiatan.map(k => ({ ...k, foto: toDirectImageUrl(k.foto) })));
+      if (Array.isArray(dataKegiatan)) setKegiatanList(dataKegiatan.map(k => ({ ...k, foto: toDirectImageUrl(k.foto), jam: sanitizeJamAgenda(k.jam) })));
       if (Array.isArray(dataKelompok)) setKelompokList(dataKelompok.map(k => ({ ...k, kapasitas: Number(k.kapasitas) || 0 })));
       if (Array.isArray(dataPengajuan)) setPengajuanBaru(dataPengajuan.map(p => ({ ...p, target: Number(p.target) || 0, anggotaKeluarga: parseAnggotaKeluarga(p.anggotaKeluarga) })));
       // PERBAIKAN BUG: sebelumnya pakai syarat "dataStruktur.length" (harus ada
@@ -884,7 +884,13 @@ export default function IuranWargaRTApp() {
       if (Array.isArray(dataRiwayatKasRt) && dataRiwayatKasRt.length) setRiwayatKasRt(dataRiwayatKasRt.map(t => ({ ...t, nominal: Number(t.nominal) || 0 })));
       if (Array.isArray(dataRealisasi)) setRealisasiBelanja(dataRealisasi.map(r => ({ ...r, nominal: Number(r.nominal) || 0 })));
       if (Array.isArray(dataAgendaUtama) && dataAgendaUtama.length) {
-        const agendaNormal = { ...dataAgendaUtama[0], foto: toDirectImageUrl(dataAgendaUtama[0].foto) };
+        // PERBAIKAN BUG "JAM 1899-12-30": nilai "jam" yang datang mentah dari
+        // Google Sheets dibersihkan dulu dengan sanitizeJamAgenda() SEBELUM
+        // dipakai mengisi formAgendaUtama. Sebelumnya cuma tampilan baca
+        // (formatAgendaLengkap) yang dibersihkan, sedangkan form EDIT-nya
+        // langsung menampilkan nilai mentah dari Sheet -> makanya kotak input
+        // "Jam" di form Kelola Agenda sempat kelihatan "1899-12-30".
+        const agendaNormal = { ...dataAgendaUtama[0], foto: toDirectImageUrl(dataAgendaUtama[0].foto), jam: sanitizeJamAgenda(dataAgendaUtama[0].jam) };
         setAgendaUtama(agendaNormal);
         setFormAgendaUtama(agendaNormal);
       }
@@ -944,6 +950,31 @@ export default function IuranWargaRTApp() {
       document.removeEventListener('visibilitychange', handleKembaliAktif);
       window.removeEventListener('focus', handleKembaliAktif);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cmsTeks.appsScriptUrl]);
+
+  // ==========================================
+  // PERBAIKAN: TAMPILAN DI HP KADANG TIDAK IKUT BERUBAH PADAHAL SUDAH
+  // DIUBAH DARI LAPTOP
+  // -----------------------------------------------------------
+  // Refresh via visibilitychange di atas HANYA jalan kalau HP-nya
+  // sempat "ditinggal" (kunci layar/pindah app) lalu dibuka lagi. Kalau
+  // layar HP dibiarkan tetap menyala & terbuka di aplikasi ini terus-
+  // menerus tanpa pernah berpindah tab, visibilitychange TIDAK PERNAH
+  // terpicu, jadi data lama bisa nyangkut lama sekali walau admin di
+  // laptop sudah menyimpan perubahan. Solusinya: tambahkan polling ringan
+  // (ambil ulang data tiap beberapa puluh detik) SELAMA tab sedang aktif
+  // terlihat, supaya semua perangkat (HP, laptop, tab lain) otomatis
+  // "menyusul" ke data terbaru tanpa perlu direfresh manual satu-satu.
+  // ==========================================
+  useEffect(() => {
+    if (!cmsTeks.appsScriptUrl) return;
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        muatSemuaDataDariSheet(true);
+      }
+    }, 45000); // setiap 45 detik, cukup ringan tapi tetap terasa "real-time"
+    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmsTeks.appsScriptUrl]);
 
@@ -1188,7 +1219,16 @@ export default function IuranWargaRTApp() {
   const KATEGORI_USIA_LIST = ['Balita (0-5)', 'Anak-anak (6-12)', 'Remaja (13-17)', 'Dewasa (18-59)', 'Lansia (60+)'];
   // Daftar pilihan hubungan keluarga untuk tiap anggota keluarga yang didaftarkan
   // (dipilih saat pendaftaran maupun saat menambah anggota baru di akun user).
-  const HUBUNGAN_KELUARGA_LIST = ['Suami', 'Istri', 'Anak ke-1', 'Anak ke-2', 'Anak ke-3', 'Anak ke-4', 'Anak ke-5'];
+  // "Kepala Keluarga" ditambahkan di urutan PALING AWAL supaya jadi pilihan
+  // default baris pertama form pendaftaran (lihat FORM_DAFTAR_ANGGOTA_AWAL &
+  // handleUserMendaftar) - warga sering lupa mengisi data dirinya sendiri
+  // (kepala keluarga) & langsung ke istri/anak, jadi baris pertama kita kunci
+  // sebagai Kepala Keluarga supaya tidak pernah terlewat lagi.
+  const HUBUNGAN_KELUARGA_LIST = ['Kepala Keluarga', 'Suami', 'Istri', 'Anak ke-1', 'Anak ke-2', 'Anak ke-3', 'Anak ke-4', 'Anak ke-5'];
+  // Pilihan hubungan untuk baris TAMBAHAN (istri/anak/dst) setelah baris
+  // Kepala Keluarga yang sudah dikunci di awal form pendaftaran - sengaja
+  // tidak menyertakan "Kepala Keluarga" lagi supaya tidak dobel per KK.
+  const HUBUNGAN_KELUARGA_TAMBAHAN_LIST = HUBUNGAN_KELUARGA_LIST.filter(h => h !== 'Kepala Keluarga');
   const kategoriUsia = (usia) => {
     if (usia === null || usia === undefined) return '-';
     if (usia <= 5) return 'Balita (0-5)';
@@ -1211,13 +1251,62 @@ export default function IuranWargaRTApp() {
     return rekap;
   };
 
-  const [formDaftar, setFormDaftar] = useState({ nama: '', blokRumah: DAFTAR_BLOK_RUMAH[0], nomorRumahUnit: DAFTAR_NOMOR_RUMAH[0], email: '', wa: '', alamat: '', statusRumah: 'Milik Sendiri', anggotaKeluarga: [] });
+  // ==========================================
+  // RINGKASAN JUMLAH KK & JIWA PER BLOK RUMAH (F1, F2, dst dari
+  // DAFTAR_BLOK_RUMAH) - dipakai supaya calon warga yang MENDAFTAR (belum
+  // login) bisa lihat keramaian tiap blok langsung di dekat dropdown "Blok
+  // Rumah", tanpa perlu buka menu admin. SENGAJA HANYA MENAMPILKAN JUMLAH
+  // (bukan nama warga) supaya data pribadi warga lain tidak bocor ke halaman
+  // publik/pendaftaran - daftar nama lengkap tetap hanya ada di menu "Rekap
+  // Blok Rumah" & khusus terlihat kalau akses === 'admin'.
+  // -----------------------------------------------------------
+  // Dicocokkan lewat awalan "Blok {blok} No." pada field nomorRumah supaya
+  // sesuai dengan pilihan Blok Rumah yang dipilih warga sendiri saat
+  // mendaftar (bukan field "kelompok" yang bisa diubah admin terpisah).
+  // ==========================================
+  const getRingkasanBlokRumah = () => {
+    return DAFTAR_BLOK_RUMAH.map(blok => {
+      const awalan = `Blok ${blok} No.`;
+      const anggotaBlokIni = members.filter(m => (m.nomorRumah || '').startsWith(awalan));
+      const jumlahKK = anggotaBlokIni.length;
+      const jumlahJiwa = jumlahKK + anggotaBlokIni.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
+      return { blok, jumlahKK, jumlahJiwa };
+    });
+  };
 
-  // KELOLA BARIS ANGGOTA KELUARGA (ISTRI & ANAK) PADA FORM PENDAFTARAN
+  // ID TETAP untuk baris "Kepala Keluarga" yang dikunci di awal form
+  // pendaftaran (lihat catatan HUBUNGAN_KELUARGA_LIST di atas). Dengan ID
+  // tetap ini kita selalu bisa mengenali & mengunci baris pertama, apa pun
+  // urutan baris lain yang ditambahkan warga.
+  const ID_BARIS_KEPALA_KELUARGA = 'AK-KEPALA-KELUARGA';
+  const buatBarisKepalaKeluargaKosong = () => ({ id: ID_BARIS_KEPALA_KELUARGA, nama: '', hubungan: 'Kepala Keluarga', jenisKelamin: 'Laki-laki', tanggalLahir: '' });
+
+  const [formDaftar, setFormDaftar] = useState({ nama: '', blokRumah: DAFTAR_BLOK_RUMAH[0], nomorRumahUnit: DAFTAR_NOMOR_RUMAH[0], email: '', wa: '', alamat: '', statusRumah: 'Milik Sendiri', anggotaKeluarga: [buatBarisKepalaKeluargaKosong()] });
+
+  // Nama pada baris "Kepala Keluarga" SELALU mengikuti isian "Nama Kepala
+  // Keluarga" paling atas form - warga tidak perlu mengetik nama dua kali,
+  // cukup lengkapi tanggal lahir & jenis kelamin di baris tersebut.
+  const handleUbahNamaKepalaKeluarga = (nilai) => {
+    setFormDaftar(prev => ({
+      ...prev,
+      nama: nilai,
+      anggotaKeluarga: prev.anggotaKeluarga.map(a => a.id === ID_BARIS_KEPALA_KELUARGA ? { ...a, nama: nilai } : a),
+    }));
+  };
+
+  // KELOLA BARIS ANGGOTA KELUARGA (ISTRI & ANAK) PADA FORM PENDAFTARAN.
+  // Baris Kepala Keluarga (ID_BARIS_KEPALA_KELUARGA) SELALU ada di posisi
+  // pertama & tidak bisa dihapus/diganti hubungannya - lihat catatan di
+  // HUBUNGAN_KELUARGA_LIST kenapa ini dikunci (warga sering lupa mengisi
+  // data dirinya sendiri sebelum mendaftar).
   const handleTambahBarisAnggotaDaftar = () => {
-    setFormDaftar(prev => ({ ...prev, anggotaKeluarga: [...prev.anggotaKeluarga, { id: 'AK-' + Date.now() + '-' + Math.floor(Math.random() * 1000), nama: '', hubungan: HUBUNGAN_KELUARGA_LIST[0], jenisKelamin: 'Perempuan', tanggalLahir: '' }] }));
+    setFormDaftar(prev => ({ ...prev, anggotaKeluarga: [...prev.anggotaKeluarga, { id: 'AK-' + Date.now() + '-' + Math.floor(Math.random() * 1000), nama: '', hubungan: HUBUNGAN_KELUARGA_TAMBAHAN_LIST[0], jenisKelamin: 'Perempuan', tanggalLahir: '' }] }));
   };
   const handleHapusBarisAnggotaDaftar = (id) => {
+    if (id === ID_BARIS_KEPALA_KELUARGA) {
+      showToast('Data Kepala Keluarga wajib ada & tidak bisa dihapus.', 'error');
+      return;
+    }
     setFormDaftar(prev => ({ ...prev, anggotaKeluarga: prev.anggotaKeluarga.filter(a => a.id !== id) }));
   };
   const handleUbahBarisAnggotaDaftar = (id, field, value) => {
@@ -2632,6 +2721,31 @@ export default function IuranWargaRTApp() {
     showToast('Agenda utama berhasil disimpan & langsung tampil besar di halaman Beranda.');
   };
 
+  // Kosongkan form (BUKAN data yang sudah tersimpan) supaya admin bisa mulai
+  // mengisi Agenda Utama yang benar-benar BARU dari nol, tanpa harus
+  // menghapus satu-satu isian lama dulu. Data lama tetap tampil di Beranda
+  // sampai admin menekan "Simpan Agenda Utama" dengan isian yang baru ini.
+  const handleBuatAgendaUtamaBaru = () => {
+    setFormAgendaUtama({ judul: '', tanggal: '', jam: '', tempat: '', pembicara: '', detail: '', foto: null });
+    showToast('Form dikosongkan, silakan isi Agenda Utama yang baru lalu tekan Simpan.');
+  };
+
+  // Menghapus Agenda Utama yang sedang aktif (mis. kegiatan sudah lewat &
+  // belum ada penggantinya) -> kotak "Agenda Utama" otomatis hilang dari
+  // Beranda sampai admin mengisi & menyimpan yang baru lagi.
+  const handleHapusAgendaUtama = () => {
+    if (!agendaUtama.judul) {
+      showToast('Belum ada Agenda Utama yang tersimpan.', 'error');
+      return;
+    }
+    const ok = window.confirm('Hapus Agenda Utama yang sedang tampil di Beranda? Kotak Agenda Utama akan hilang sampai diisi ulang.');
+    if (!ok) return;
+    const kosong = { judul: '', tanggal: '', jam: '', tempat: '', pembicara: '', detail: '', foto: null };
+    updateAgendaUtama(kosong);
+    setFormAgendaUtama(kosong);
+    showToast('Agenda utama dihapus dari Beranda.', 'error');
+  };
+
   const handleUserMendaftar = (e) => {
     e.preventDefault();
     if (!formDaftar.blokRumah || !formDaftar.nomorRumahUnit) {
@@ -2646,8 +2760,12 @@ export default function IuranWargaRTApp() {
       showToast('Status rumah (Kontrak/Milik Sendiri) wajib dipilih.', 'error');
       return;
     }
-    if (formDaftar.anggotaKeluarga.length === 0) {
-      showToast('Tambahkan minimal 1 anggota keluarga (istri/anak) sebelum mendaftar.', 'error');
+    // Baris Kepala Keluarga SELALU ada (dikunci di awal), jadi di sini cukup
+    // dipastikan tanggal lahir & jenis kelaminnya sudah dilengkapi warga -
+    // namanya sendiri sudah otomatis terisi dari "Nama Kepala Keluarga".
+    const barisKK = formDaftar.anggotaKeluarga.find(a => a.id === ID_BARIS_KEPALA_KELUARGA);
+    if (!barisKK || !barisKK.tanggalLahir) {
+      showToast('Lengkapi tanggal lahir & jenis kelamin Kepala Keluarga (Anda) di bagian Anggota Keluarga.', 'error');
       return;
     }
     for (const a of formDaftar.anggotaKeluarga) {
@@ -2665,11 +2783,11 @@ export default function IuranWargaRTApp() {
     tambahNotifikasi({
       untuk: 'admin',
       judul: 'Pendaftaran Member Baru',
-      pesan: `${formDaftar.nama} (Nomor Rumah/Blok: ${nomorRumahGabungan}, ${formDaftar.statusRumah}, ${formDaftar.anggotaKeluarga.length} anggota keluarga) mendaftar sebagai calon warga baru. Menunggu aktivasi.`,
+      pesan: `${formDaftar.nama} (Nomor Rumah/Blok: ${nomorRumahGabungan}, ${formDaftar.statusRumah}, ${formDaftar.anggotaKeluarga.length} anggota keluarga termasuk Kepala Keluarga) mendaftar sebagai calon warga baru. Menunggu aktivasi.`,
       tipe: 'pending'
     });
     showToast('Pendaftaran terkirim! Silakan menunggu aktivasi dari admin/bendahara.');
-    setFormDaftar({ nama: '', blokRumah: DAFTAR_BLOK_RUMAH[0], nomorRumahUnit: DAFTAR_NOMOR_RUMAH[0], email: '', wa: '', alamat: '', statusRumah: 'Milik Sendiri', anggotaKeluarga: [] });
+    setFormDaftar({ nama: '', blokRumah: DAFTAR_BLOK_RUMAH[0], nomorRumahUnit: DAFTAR_NOMOR_RUMAH[0], email: '', wa: '', alamat: '', statusRumah: 'Milik Sendiri', anggotaKeluarga: [buatBarisKepalaKeluargaKosong()] });
   };
 
   // AKTIVASI WARGA BARU -> GENERATE PASSWORD ACAK -> SIMULASI KIRIM EMAIL
@@ -2869,7 +2987,7 @@ export default function IuranWargaRTApp() {
 
   const handleEditKegiatan = (k) => {
     setEditingKegiatanId(k.id);
-    setFormKegiatan({ judul: k.judul, tanggal: k.tanggal, jam: k.jam || '', tempat: k.tempat || '', pembicara: k.pembicara || '', detail: k.detail || '', foto: k.foto || null });
+    setFormKegiatan({ judul: k.judul, tanggal: k.tanggal, jam: sanitizeJamAgenda(k.jam) || '', tempat: k.tempat || '', pembicara: k.pembicara || '', detail: k.detail || '', foto: k.foto || null });
     window.scrollTo && window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -3388,7 +3506,7 @@ export default function IuranWargaRTApp() {
                 <h3 className="text-sm font-black text-slate-900 text-center mb-1">Pendaftaran Akun</h3>
                 <p className="text-[10px] text-slate-400 text-center mb-4">Setelah diaktivasi bendahara, username &amp; password acak akan dikirim ke WA Anda.</p>
                 <form onSubmit={handleUserMendaftar} className="space-y-3 text-xs font-semibold">
-                  <div><label className="block mb-1 text-slate-600">Nama Kepala Keluarga</label><input type="text" required placeholder="Hidayat" value={formDaftar.nama} onChange={(e) => setFormDaftar({...formDaftar, nama: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
+                  <div><label className="block mb-1 text-slate-600">Nama Kepala Keluarga</label><input type="text" required placeholder="Hidayat" value={formDaftar.nama} onChange={(e) => handleUbahNamaKepalaKeluarga(e.target.value)} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                   <div>
                     <label className="block mb-1 text-slate-600">Status Rumah</label>
                     <div className="grid grid-cols-2 gap-2">
@@ -3407,6 +3525,22 @@ export default function IuranWargaRTApp() {
                       <PilihanDropdown value={formDaftar.nomorRumahUnit} options={DAFTAR_NOMOR_RUMAH} onChange={(v) => setFormDaftar({...formDaftar, nomorRumahUnit: v})} placeholder="Pilih Nomor" />
                     </div>
                   </div>
+
+                  {/* KETERANGAN JUMLAH KK & JIWA TIAP BLOK - HANYA JUMLAH, TANPA
+                      NAMA (lihat getRingkasanBlokRumah). Supaya calon warga bisa
+                      lihat keramaian tiap blok sebelum memilih Blok Rumah. */}
+                  <div className="bg-slate-50 border rounded-xl p-2.5">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wide mb-1.5">Keterangan Jumlah Warga per Blok</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                      {getRingkasanBlokRumah().map(r => (
+                        <div key={r.blok} className={`border rounded-lg px-2 py-1.5 text-[10px] ${formDaftar.blokRumah === r.blok ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600'}`}>
+                          <span className="font-black block">Blok {r.blok}</span>
+                          <span className={formDaftar.blokRumah === r.blok ? 'text-emerald-50' : 'text-slate-400'}>{r.jumlahKK} KK • {r.jumlahJiwa} Jiwa</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
                   <div><label className="block mb-1 text-slate-600">Email</label><input type="email" required placeholder="hidayat@mail.com" value={formDaftar.email} onChange={(e) => setFormDaftar({...formDaftar, email: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                   <div><label className="block mb-1 text-slate-600">WhatsApp</label><input type="text" required placeholder="08123" value={formDaftar.wa} onChange={(e) => setFormDaftar({...formDaftar, wa: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                   <div><label className="block mb-1 text-slate-600">Alamat Tinggal</label><textarea rows={2} required placeholder="Blok A No. 1, Perum Bumi Indah Proklamasi, RT 40/RW 08" value={formDaftar.alamat} onChange={(e) => setFormDaftar({...formDaftar, alamat: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
@@ -3415,21 +3549,31 @@ export default function IuranWargaRTApp() {
                       NANTINYA MASUK KE TAB "ANGGOTA KELUARGA" DI AKUN USER SETELAH AKTIVASI */}
                   <div className="border-t pt-3">
                     <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-slate-600">Anggota Keluarga (Istri &amp; Anak)</label>
+                      <label className="block text-slate-600">Anggota Keluarga</label>
                       <button type="button" onClick={handleTambahBarisAnggotaDaftar} className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-lg">+ Tambah</button>
                     </div>
-                    <p className="text-[9px] text-slate-400 mb-2">Wajib diisi minimal 1 anggota (istri/anak). Usia dihitung otomatis dari tanggal lahir.</p>
+                    <p className="text-[9px] text-slate-400 mb-2">Baris pertama (Kepala Keluarga) wajib & terkunci - namanya otomatis mengikuti "Nama Kepala Keluarga" di atas, tinggal lengkapi tanggal lahir &amp; jenis kelamin. Tekan "+ Tambah" untuk menambahkan istri/suami/anak. Usia dihitung otomatis dari tanggal lahir.</p>
                     <div className="space-y-2">
-                      {formDaftar.anggotaKeluarga.map((a, i) => (
-                        <div key={a.id} className="bg-slate-50 border rounded-xl p-2.5 space-y-1.5">
+                      {formDaftar.anggotaKeluarga.map((a, i) => {
+                        const terkunci = a.id === ID_BARIS_KEPALA_KELUARGA;
+                        return (
+                        <div key={a.id} className={`border rounded-xl p-2.5 space-y-1.5 ${terkunci ? 'bg-amber-50 border-amber-200' : 'bg-slate-50'}`}>
                           <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-black text-slate-400 uppercase">Anggota #{i + 1}</span>
-                            <button type="button" onClick={() => handleHapusBarisAnggotaDaftar(a.id)} className="text-[10px] font-bold text-rose-600">Hapus</button>
+                            <span className={`text-[10px] font-black uppercase ${terkunci ? 'text-amber-600' : 'text-slate-400'}`}>{terkunci ? '🔒 Kepala Keluarga (Anda)' : `Anggota #${i}`}</span>
+                            {!terkunci && <button type="button" onClick={() => handleHapusBarisAnggotaDaftar(a.id)} className="text-[10px] font-bold text-rose-600">Hapus</button>}
                           </div>
-                          <input type="text" required placeholder="Nama lengkap" value={a.nama} onChange={(e) => handleUbahBarisAnggotaDaftar(a.id, 'nama', e.target.value)} className="w-full border p-2 rounded-lg bg-white text-[11px]" />
-                          <select required value={a.hubungan} onChange={(e) => handleUbahBarisAnggotaDaftar(a.id, 'hubungan', e.target.value)} className="w-full border p-2 rounded-lg bg-white text-[11px] font-bold">
-                            {HUBUNGAN_KELUARGA_LIST.map(h => <option key={h} value={h}>{h}</option>)}
-                          </select>
+                          {terkunci ? (
+                            <input type="text" disabled placeholder="Otomatis dari Nama Kepala Keluarga di atas" value={a.nama} className="w-full border p-2 rounded-lg bg-slate-100 text-[11px] text-slate-500" />
+                          ) : (
+                            <input type="text" required placeholder="Nama lengkap" value={a.nama} onChange={(e) => handleUbahBarisAnggotaDaftar(a.id, 'nama', e.target.value)} className="w-full border p-2 rounded-lg bg-white text-[11px]" />
+                          )}
+                          {terkunci ? (
+                            <input type="text" disabled value="Kepala Keluarga" className="w-full border p-2 rounded-lg bg-slate-100 text-[11px] font-bold text-slate-500" />
+                          ) : (
+                            <select required value={a.hubungan} onChange={(e) => handleUbahBarisAnggotaDaftar(a.id, 'hubungan', e.target.value)} className="w-full border p-2 rounded-lg bg-white text-[11px] font-bold">
+                              {HUBUNGAN_KELUARGA_TAMBAHAN_LIST.map(h => <option key={h} value={h}>{h}</option>)}
+                            </select>
+                          )}
                           <div className="grid grid-cols-2 gap-1.5">
                             <select required value={a.jenisKelamin} onChange={(e) => handleUbahBarisAnggotaDaftar(a.id, 'jenisKelamin', e.target.value)} className="w-full border p-2 rounded-lg bg-white text-[11px] font-bold">
                               <option value="Perempuan">Perempuan</option>
@@ -3438,10 +3582,8 @@ export default function IuranWargaRTApp() {
                             <input type="date" required value={a.tanggalLahir} onChange={(e) => handleUbahBarisAnggotaDaftar(a.id, 'tanggalLahir', e.target.value)} className="w-full border p-2 rounded-lg bg-white text-[11px]" />
                           </div>
                         </div>
-                      ))}
-                      {formDaftar.anggotaKeluarga.length === 0 && (
-                        <p className="text-slate-400 italic text-[10px] text-center py-2">Belum ada anggota keluarga ditambahkan.</p>
-                      )}
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -5714,15 +5856,29 @@ export default function IuranWargaRTApp() {
                   <form onSubmit={handleSimpanAgendaUtama} className="border-t pt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <h4 className="sm:col-span-2 text-slate-900 font-black text-xs -mb-1">Form Agenda Utama / Spesial</h4>
                     <div className="sm:col-span-2"><label className="block text-slate-600 mb-1">Judul / Agenda Spesial</label><input type="text" value={formAgendaUtama.judul} onChange={(e) => setFormAgendaUtama({...formAgendaUtama, judul: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" placeholder="Kerja Bakti & Silaturahmi Warga" /></div>
-                    <div><label className="block text-slate-600 mb-1">Tanggal</label><input type="text" value={formAgendaUtama.tanggal} onChange={(e) => setFormAgendaUtama({...formAgendaUtama, tanggal: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" placeholder="17 Jun 2026" /></div>
-                    <div><label className="block text-slate-600 mb-1">Jam</label><input type="text" value={formAgendaUtama.jam} onChange={(e) => setFormAgendaUtama({...formAgendaUtama, jam: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" placeholder="07:00" /></div>
+                    <div><label className="block text-slate-600 mb-1">Tanggal</label><input type="date" value={formAgendaUtama.tanggal} onChange={(e) => setFormAgendaUtama({...formAgendaUtama, tanggal: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" placeholder="17 Jun 2026" /></div>
+                    {/* PERBAIKAN BUG "1899-12-30": pakai <input type="time"> (bukan text)
+                        supaya nilai jam SELALU rapi format HH:MM, tidak akan pernah lagi
+                        ketiban nilai serial tanggal mentah dari Google Sheets. Nilai yang
+                        ditampilkan juga dibersihkan dulu lewat sanitizeJamAgenda() sebagai
+                        lapisan pengaman tambahan kalau ada data lama yang masih kotor. */}
+                    <div><label className="block text-slate-600 mb-1">Jam</label><input type="time" value={sanitizeJamAgenda(formAgendaUtama.jam)} onChange={(e) => setFormAgendaUtama({...formAgendaUtama, jam: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" placeholder="07:00" /></div>
                     <div><label className="block text-slate-600 mb-1">Tempat</label><input type="text" value={formAgendaUtama.tempat} onChange={(e) => setFormAgendaUtama({...formAgendaUtama, tempat: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" placeholder="RT Jami' Nurul Falah" /></div>
                     <div><label className="block text-slate-600 mb-1">Pembicara / Penanggung Jawab</label><input type="text" value={formAgendaUtama.pembicara} onChange={(e) => setFormAgendaUtama({...formAgendaUtama, pembicara: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                     <div className="sm:col-span-2"><label className="block text-slate-600 mb-1">Deskripsi Agenda Utama</label><textarea rows={2} value={formAgendaUtama.detail} onChange={(e) => setFormAgendaUtama({...formAgendaUtama, detail: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                     <div className="sm:col-span-2"><label className="block text-slate-600 mb-1">Upload Foto Agenda Utama (ukuran lebih besar)</label><input type="file" accept="image/*" onChange={handleFotoAgendaUtamaChange} className="w-full border p-2 rounded-xl bg-slate-50" />
                       {formAgendaUtama.foto && <img loading="lazy" decoding="async" src={formAgendaUtama.foto} alt="preview" className="w-32 h-20 object-cover rounded-lg border mt-2" />}
                     </div>
-                    <button type="submit" className="sm:col-span-2 bg-amber-500 text-slate-950 font-black px-6 py-2.5 rounded-xl transition-transform duration-150 hover:scale-[1.01] shadow-lg">⭐ Simpan Agenda Utama</button>
+                    <div className="sm:col-span-2 flex flex-col sm:flex-row gap-2">
+                      <button type="submit" className="flex-1 bg-amber-500 text-slate-950 font-black px-6 py-2.5 rounded-xl transition-transform duration-150 hover:scale-[1.01] shadow-lg">⭐ Simpan Agenda Utama</button>
+                      {/* Ganti/edit ke agenda yang sama sekali baru: kosongkan dulu
+                          form-nya (tidak menghapus data yang sedang tampil sampai
+                          tombol Simpan di atas ditekan). */}
+                      <button type="button" onClick={handleBuatAgendaUtamaBaru} className="bg-slate-100 text-slate-700 font-bold px-4 py-2.5 rounded-xl border transition-transform duration-150 hover:scale-[1.01]">🔄 Ganti / Buat Baru</button>
+                      {agendaUtama.judul && (
+                        <button type="button" onClick={handleHapusAgendaUtama} className="bg-rose-50 text-rose-600 font-bold px-4 py-2.5 rounded-xl border border-rose-200 transition-transform duration-150 hover:scale-[1.01]">🗑️ Hapus</button>
+                      )}
+                    </div>
                   </form>
                 </div>
 
@@ -5767,7 +5923,10 @@ export default function IuranWargaRTApp() {
                     )}
                     <div><label className="block text-slate-600 mb-1">Judul / Agenda</label><input type="text" value={formKegiatan.judul} onChange={(e) => setFormKegiatan({...formKegiatan, judul: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" placeholder="Pengajian Rutin &quot;Manfaat Istigfar&quot;" /></div>
                     <div><label className="block text-slate-600 mb-1">Tanggal</label><input type="text" value={formKegiatan.tanggal} onChange={(e) => setFormKegiatan({...formKegiatan, tanggal: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" placeholder="29 Jul 2026" /></div>
-                    <div><label className="block text-slate-600 mb-1">Jam</label><input type="text" value={formKegiatan.jam} onChange={(e) => setFormKegiatan({...formKegiatan, jam: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" placeholder="19:40" /></div>
+                    {/* PERBAIKAN BUG "1899-12-30" (sama seperti Agenda Utama): pakai
+                        <input type="time"> + sanitizeJamAgenda() supaya jam kegiatan
+                        biasa juga tidak pernah menampilkan nilai serial tanggal mentah. */}
+                    <div><label className="block text-slate-600 mb-1">Jam</label><input type="time" value={sanitizeJamAgenda(formKegiatan.jam)} onChange={(e) => setFormKegiatan({...formKegiatan, jam: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" placeholder="19:40" /></div>
                     <div><label className="block text-slate-600 mb-1">Tempat</label><input type="text" value={formKegiatan.tempat} onChange={(e) => setFormKegiatan({...formKegiatan, tempat: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" placeholder="RT Jami' Nurul Falah" /></div>
                     <div><label className="block text-slate-600 mb-1">Pembicara</label><input type="text" value={formKegiatan.pembicara} onChange={(e) => setFormKegiatan({...formKegiatan, pembicara: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" placeholder="Ustad Sana'an" /></div>
                     <div className="sm:col-span-2"><label className="block text-slate-600 mb-1">Deskripsi Kegiatan</label><textarea rows={2} value={formKegiatan.detail} onChange={(e) => setFormKegiatan({...formKegiatan, detail: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
