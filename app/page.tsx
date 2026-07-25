@@ -493,6 +493,21 @@ export default function IuranWargaRTApp() {
     ...CONTOH_SIMULASI_TAMBAHAN_FG, // contoh 1 warga Blok F & 1 warga Blok G, supaya tombol simulasi juga bisa memperlihatkan blok F/G
   ];
 
+  // DATA DUMMY "TERBARU BERDASARKAN DAFTAR PORTAL RT 40" & "WARGA KELUAR"
+  // -----------------------------------------------------------
+  // Khusus untuk SIMULASI AKUN (isSimulatedSession) di menu Informasi Warga,
+  // supaya pengunjung yang mencoba simulasi TIDAK melihat data warga ASLI
+  // (nama & alamat sesungguhnya), melainkan contoh/dummy saja (1-5 data).
+  const WARGA_TERBARU_DUMMY = [
+    { id: 'SIM-WB-01', nama: 'Contoh Warga Baru 1 (Simulasi)', nomorRumah: 'Blok A No. 1', bergabung: '2026-07-20' },
+    { id: 'SIM-WB-02', nama: 'Contoh Warga Baru 2 (Simulasi)', nomorRumah: 'Blok B No. 4', bergabung: '2026-07-14' },
+    { id: 'SIM-WB-03', nama: 'Contoh Warga Baru 3 (Simulasi)', nomorRumah: 'Blok F5 No. 2', bergabung: '2026-07-05' },
+  ];
+  const WARGA_KELUAR_DUMMY = [
+    { id: 'SIM-WK-01', nama: 'Contoh Warga Keluar 1 (Simulasi)', blok: 'Blok C No. 9', tanggalKeluar: '2026-06-18' },
+    { id: 'SIM-WK-02', nama: 'Contoh Warga Keluar 2 (Simulasi)', blok: 'Blok G3 No. 6', tanggalKeluar: '2026-05-30' },
+  ];
+
   // ==========================================
   // DATA WARGA KELUAR (WARGA YANG PINDAH/KELUAR DARI LINGKUNGAN RT)
   // -----------------------------------------------------------
@@ -3696,8 +3711,9 @@ export default function IuranWargaRTApp() {
               // Warga Terbaru & Warga Keluar: SEMUA data RT ditampilkan baik untuk
               // Admin maupun akun user (warga) - supaya info warga masuk/keluar
               // otomatis konek & terlihat oleh seluruh warga, bukan hanya blok sendiri.
-              const wargaTerbaru = members.slice(-5).reverse();
-              const wargaKeluarTampil = wargaKeluarList.slice(-5).reverse();
+              // KHUSUS SIMULASI AKUN: pakai data dummy (1-5 contoh), BUKAN data asli.
+              const wargaTerbaru = isSimulatedSession ? WARGA_TERBARU_DUMMY : members.slice(-5).reverse();
+              const wargaKeluarTampil = isSimulatedSession ? WARGA_KELUAR_DUMMY : wargaKeluarList.slice(-5).reverse();
 
               return (
                 <div className="space-y-6">
@@ -3924,7 +3940,7 @@ export default function IuranWargaRTApp() {
                   {/* WARGA TERBARU & WARGA KELUAR (dibagi 2 kolom berdampingan) */}
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div className="bg-white p-5 rounded-2xl border shadow-xs">
-                      <h4 className="text-xs font-extrabold text-slate-900 uppercase mb-3">Warga Terbaru</h4>
+                      <h4 className="text-xs font-extrabold text-slate-900 uppercase mb-3">Terbaru berdasarkan daftar Portal RT 40</h4>
                       <ul className="divide-y text-[11px] font-semibold">
                         {wargaTerbaru.map(m => (
                           <li key={m.id} className="py-2 flex justify-between items-center gap-2">
