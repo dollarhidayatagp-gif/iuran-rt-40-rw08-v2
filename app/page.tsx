@@ -357,6 +357,18 @@ export default function IuranWargaRTApp() {
   const [editingRealisasiId, setEditingRealisasiId] = useState(null); // id baris Realisasi Belanja yang sedang diedit admin (null = mode tambah baru)
   const [previewLampiran, setPreviewLampiran] = useState(null); // { judul, url, namaFile, tipe: 'gambar'|'pdf' }
 
+  // ==========================================
+  // DAFTAR KATEGORI REALISASI BELANJA (BISA DIKELOLA ADMIN)
+  // -----------------------------------------------------------
+  // Sebelumnya daftar kategori (Kebersihan/Keamanan/dst) hardcode di dalam
+  // <select>, sekarang disimpan sebagai state supaya admin bisa Tambah/Edit/
+  // Hapus kategori sesuai kebutuhan RT lewat panel "Kelola Kategori Belanja".
+  // ==========================================
+  const [kategoriBelanjaList, setKategoriBelanjaList] = useState(['Kebersihan', 'Keamanan', 'Sosial', 'Operasional', 'Perbaikan Fasilitas', 'Lain-lain']);
+  const [formKategoriBaru, setFormKategoriBaru] = useState('');
+  const [editingKategoriIdx, setEditingKategoriIdx] = useState(null);
+  const [formEditKategori, setFormEditKategori] = useState('');
+
   // DATA DUMMY TETAP (statis) khusus tampilan simulasi di Web Utama - TIDAK PERNAH
   // ikut sinkron ke Google Sheets, murni contoh gambaran bagi pengunjung.
   const DUMMY_REALISASI_SIMULASI = [
@@ -2169,6 +2181,69 @@ export default function IuranWargaRTApp() {
   const handleBatalEditRealisasiBelanja = () => {
     setEditingRealisasiId(null);
     setFormRealisasiBaru({ tanggal: '', kategori: 'Kebersihan', keterangan: '', nominal: '', kelompok: 'Semua', buktiUrl: null, buktiNamaFile: null });
+  };
+
+  // ==========================================
+  // KELOLA KATEGORI REALISASI BELANJA (TAMBAH/EDIT/HAPUS)
+  // -----------------------------------------------------------
+  // Kategori disimpan di kategoriBelanjaList (state) supaya bisa disesuaikan
+  // admin, bukan daftar tetap. Saat kategori di-EDIT (rename), seluruh data
+  // realisasiBelanja yang sebelumnya memakai nama kategori lama otomatis ikut
+  // diperbarui ke nama baru supaya data tetap konsisten/tidak "nyangkut".
+  // ==========================================
+  const handleTambahKategoriBelanja = (e) => {
+    e.preventDefault();
+    const nama = formKategoriBaru.trim();
+    if (!nama) { showToast('Nama kategori wajib diisi.', 'error'); return; }
+    if (kategoriBelanjaList.some(k => k.toLowerCase() === nama.toLowerCase())) {
+      showToast(`Kategori "${nama}" sudah ada.`, 'error');
+      return;
+    }
+    setKategoriBelanjaList(prev => [...prev, nama]);
+    setFormKategoriBaru('');
+    showToast(`Kategori "${nama}" berhasil ditambahkan.`);
+  };
+
+  const handleMulaiEditKategoriBelanja = (idx) => {
+    setEditingKategoriIdx(idx);
+    setFormEditKategori(kategoriBelanjaList[idx]);
+  };
+
+  const handleBatalEditKategoriBelanja = () => {
+    setEditingKategoriIdx(null);
+    setFormEditKategori('');
+  };
+
+  const handleSimpanEditKategoriBelanja = (idx) => {
+    const namaBaru = formEditKategori.trim();
+    if (!namaBaru) { showToast('Nama kategori wajib diisi.', 'error'); return; }
+    const namaLama = kategoriBelanjaList[idx];
+    if (kategoriBelanjaList.some((k, i) => i !== idx && k.toLowerCase() === namaBaru.toLowerCase())) {
+      showToast(`Kategori "${namaBaru}" sudah ada.`, 'error');
+      return;
+    }
+    setKategoriBelanjaList(prev => prev.map((k, i) => i === idx ? namaBaru : k));
+    // Cascade: perbarui juga kategori pada data realisasi belanja yang sudah tercatat
+    // memakai nama kategori lama, supaya tetap konsisten dengan nama yang baru.
+    if (namaLama !== namaBaru) {
+      updateRealisasiBelanja(prev => prev.map(r => r.kategori === namaLama ? { ...r, kategori: namaBaru } : r));
+      if (formRealisasiBaru.kategori === namaLama) setFormRealisasiBaru(prev => ({ ...prev, kategori: namaBaru }));
+    }
+    setEditingKategoriIdx(null);
+    setFormEditKategori('');
+    showToast(`Kategori "${namaLama}" berhasil diubah menjadi "${namaBaru}".`);
+  };
+
+  const handleHapusKategoriBelanja = (idx) => {
+    const nama = kategoriBelanjaList[idx];
+    const jumlahDipakai = realisasiBelanja.filter(r => r.kategori === nama).length;
+    const ok = window.confirm(`Hapus kategori "${nama}"?${jumlahDipakai > 0 ? `\n\n${jumlahDipakai} data realisasi belanja masih memakai kategori ini dan TIDAK akan ikut terhapus (kategorinya tetap tersimpan di data lama).` : ''}`);
+    if (!ok) return;
+    setKategoriBelanjaList(prev => prev.filter((_, i) => i !== idx));
+    if (formRealisasiBaru.kategori === nama) {
+      setFormRealisasiBaru(prev => ({ ...prev, kategori: kategoriBelanjaList.find((k, i) => i !== idx) || '' }));
+    }
+    showToast(`Kategori "${nama}" dihapus.`, 'error');
   };
 
   // UPLOAD LOGO CEPAT LANGSUNG DARI HEADER DASHBOARD (khusus Admin, tanpa perlu
@@ -5450,87 +5525,135 @@ export default function IuranWargaRTApp() {
             {/* REALISASI BELANJA KAS RT (BENDAHARA/ADMIN, BUKTI FOTO -> TAMPIL DI DASHBOARD WARGA ASLI) */}
             {activeMenu === 'realisasi-belanja' && role === 'admin' && (
               <div className="space-y-6">
-                <div className="bg-white p-6 rounded-2xl border shadow-xs space-y-4">
-                  <div>
-                    <h3 className="text-sm font-black text-slate-900">Realisasi Belanja Kas RT</h3>
-                    <p className="text-[11px] text-slate-400 mt-0.5">Catat setiap pengeluaran panitia lengkap dengan bukti foto struk/nota. Data ini otomatis tampil di menu "Laporan Belanja Kas RT" pada Dashboard warga yang login dengan akun ASLI (bukan simulasi).</p>
-                  </div>
-                  <div className="space-y-2 text-xs font-semibold">
-                    {realisasiBelanja.map(r => (
-                      <div key={r.id} className={`p-3 bg-slate-50 border rounded-xl flex justify-between items-center flex-wrap gap-2 ${editingRealisasiId === r.id ? 'ring-2 ring-amber-400' : ''}`}>
-                        <div className="min-w-0">
-                          <span className="inline-block text-[9px] font-black uppercase tracking-wide bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full mb-1">{r.kategori}</span>
-                          <p className="text-slate-900 font-bold">{r.keterangan}</p>
-                          <p className="text-slate-400">{formatTanggalLaporan(r.tanggal)} • Rp {r.nominal.toLocaleString('id-ID')} • Target: {r.kelompok}</p>
-                        </div>
-                        <div className="flex gap-2 shrink-0">
-                          {r.buktiUrl && (
-                            <button onClick={() => setPreviewLampiran({ judul: r.keterangan, url: r.buktiUrl, namaFile: r.buktiNamaFile, tipe: 'gambar' })} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded-lg">📷 Bukti</button>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">Realisasi Belanja Kas RT</h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Catat setiap pengeluaran panitia lengkap dengan bukti foto struk/nota. Data ini otomatis tampil di menu "Laporan Belanja Kas RT" pada Dashboard warga yang login dengan akun ASLI (bukan simulasi).</p>
+                </div>
+
+                {/* LAYOUT DUA KOLOM: KIRI = FORM TAMBAH/EDIT + KELOLA KATEGORI, KANAN = DAFTAR REALISASI */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                  {/* KOLOM KIRI */}
+                  <div className="space-y-4">
+                    <div className="bg-white p-5 rounded-2xl border shadow-xs">
+                      <form onSubmit={handleTambahRealisasiBelanja} className={`border rounded-xl p-4 space-y-2 text-xs font-semibold ${editingRealisasiId ? 'bg-amber-50 border-amber-300' : 'bg-emerald-50 border-emerald-200'}`}>
+                        <div className="flex justify-between items-center">
+                          <p className={`font-black text-[11px] ${editingRealisasiId ? 'text-amber-700' : 'text-emerald-800'}`}>{editingRealisasiId ? '✏️ Edit Realisasi Belanja' : '+ Tambah Realisasi Belanja'}</p>
+                          {editingRealisasiId && (
+                            <button type="button" onClick={handleBatalEditRealisasiBelanja} className="text-[10px] font-bold text-amber-700 underline">Batalkan Edit</button>
                           )}
-                          <button onClick={() => handleEditRealisasiBelanja(r)} className="bg-amber-100 text-amber-700 px-2.5 py-1 rounded-lg font-black">Edit</button>
-                          <button onClick={() => handleHapusRealisasiBelanja(r.id)} className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded-lg">Hapus</button>
                         </div>
+                        {editingRealisasiId && (
+                          <p className="text-[10px] text-amber-700 -mt-1">Kosongkan field Tanggal kalau tidak ingin mengubah tanggal yang sudah tercatat.</p>
+                        )}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div>
+                            <label className="block mb-1 text-slate-600 text-[11px]">Tanggal</label>
+                            <input type="date" value={formRealisasiBaru.tanggal} onChange={(e) => setFormRealisasiBaru({...formRealisasiBaru, tanggal: e.target.value})} className="w-full border p-2 rounded-xl bg-white text-[12px]" />
+                          </div>
+                          <div>
+                            <label className="block mb-1 text-slate-600 text-[11px]">Kategori</label>
+                            <select value={formRealisasiBaru.kategori} onChange={(e) => setFormRealisasiBaru({...formRealisasiBaru, kategori: e.target.value})} className="w-full border p-2 rounded-xl bg-white font-bold text-[12px]">
+                              {kategoriBelanjaList.map(k => <option key={k}>{k}</option>)}
+                            </select>
+                          </div>
+                          <div className="sm:col-span-2">
+                            <label className="block mb-1 text-slate-600 text-[11px]">Keterangan</label>
+                            <input type="text" placeholder="mis. Perbaikan pos ronda Blok A" value={formRealisasiBaru.keterangan} onChange={(e) => setFormRealisasiBaru({...formRealisasiBaru, keterangan: e.target.value})} className="w-full border p-2 rounded-xl bg-white text-[12px]" />
+                          </div>
+                          <div>
+                            <label className="block mb-1 text-slate-600 text-[11px]">Nominal (Rp)</label>
+                            <input type="number" min="0" placeholder="0" value={formRealisasiBaru.nominal} onChange={(e) => setFormRealisasiBaru({...formRealisasiBaru, nominal: e.target.value})} className="w-full border p-2 rounded-xl bg-white text-[12px]" />
+                          </div>
+                          <div>
+                            <label className="block mb-1 text-slate-600 text-[11px]">Target Tampil</label>
+                            <select value={formRealisasiBaru.kelompok} onChange={(e) => setFormRealisasiBaru({...formRealisasiBaru, kelompok: e.target.value})} className="w-full border p-2 rounded-xl bg-white font-bold text-[12px]">
+                              <option value="Semua">Semua Kelompok</option>
+                              {kelompokList.map(k => <option key={k.id} value={k.nama}>{k.nama}</option>)}
+                            </select>
+                          </div>
+                          <div className="sm:col-span-2">
+                            <label className="block mb-1 text-slate-600 text-[11px]">Bukti Foto Struk/Nota</label>
+                            <input type="file" accept="image/*" onChange={handleFotoRealisasiChange} className="w-full border p-2 rounded-xl bg-white text-[11px]" />
+                            {formRealisasiBaru.buktiUrl && (
+                              <div className="mt-2 flex items-center gap-2">
+                                <img loading="lazy" decoding="async" src={formRealisasiBaru.buktiUrl} alt="Preview" className="w-14 h-14 rounded-lg object-cover border" />
+                                <button type="button" onClick={() => setFormRealisasiBaru(prev => ({ ...prev, buktiUrl: null, buktiNamaFile: null }))} className="text-[10px] font-bold text-rose-600">Hapus Foto</button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex justify-end pt-1">
+                          <button type="submit" className={`text-white font-bold px-4 py-1.5 rounded-xl text-[11px] ${editingRealisasiId ? 'bg-amber-600' : 'bg-emerald-700'}`}>{editingRealisasiId ? '💾 Simpan Perubahan' : '+ Simpan Realisasi'}</button>
+                        </div>
+                      </form>
+                    </div>
+
+                    {/* KELOLA KATEGORI BELANJA (TAMBAH/EDIT/HAPUS) */}
+                    <div className="bg-white p-5 rounded-2xl border shadow-xs space-y-3">
+                      <div>
+                        <h4 className="text-[11px] font-black text-slate-900 uppercase">Kelola Kategori Belanja</h4>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Sesuaikan pilihan kategori pada form di atas - tambah kategori baru, ubah nama, atau hapus yang tidak dipakai.</p>
                       </div>
-                    ))}
-                    {realisasiBelanja.length === 0 && <p className="text-slate-400 italic">Belum ada realisasi belanja tercatat.</p>}
+                      <div className="space-y-1.5 text-xs font-semibold">
+                        {kategoriBelanjaList.map((k, idx) => (
+                          <div key={idx} className="flex items-center gap-2 bg-slate-50 border rounded-lg px-2.5 py-1.5">
+                            {editingKategoriIdx === idx ? (
+                              <>
+                                <input
+                                  value={formEditKategori}
+                                  onChange={(e) => setFormEditKategori(e.target.value)}
+                                  className="flex-1 min-w-0 border p-1.5 rounded-lg text-[11px] bg-white"
+                                  autoFocus
+                                />
+                                <button type="button" onClick={() => handleSimpanEditKategoriBelanja(idx)} className="text-emerald-700 font-black text-[10px] shrink-0">Simpan</button>
+                                <button type="button" onClick={handleBatalEditKategoriBelanja} className="text-slate-400 font-bold text-[10px] shrink-0">Batal</button>
+                              </>
+                            ) : (
+                              <>
+                                <span className="flex-1 min-w-0 font-bold text-slate-700 text-[11px] truncate">{k}</span>
+                                <button type="button" onClick={() => handleMulaiEditKategoriBelanja(idx)} className="text-amber-700 font-black text-[10px] shrink-0">Edit</button>
+                                <button type="button" onClick={() => handleHapusKategoriBelanja(idx)} className="text-rose-600 font-black text-[10px] shrink-0">Hapus</button>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                        {kategoriBelanjaList.length === 0 && <p className="text-slate-400 italic text-[11px]">Belum ada kategori. Tambahkan lewat form di bawah.</p>}
+                      </div>
+                      <form onSubmit={handleTambahKategoriBelanja} className="flex gap-2 pt-1">
+                        <input
+                          value={formKategoriBaru}
+                          onChange={(e) => setFormKategoriBaru(e.target.value)}
+                          placeholder="Nama kategori baru"
+                          className="flex-1 min-w-0 border p-2 rounded-lg text-[11px] bg-white"
+                        />
+                        <button type="submit" className="bg-emerald-700 text-white font-black text-[10px] px-3 rounded-lg shrink-0">+ Tambah</button>
+                      </form>
+                    </div>
                   </div>
 
-                  <form onSubmit={handleTambahRealisasiBelanja} className={`border rounded-xl p-4 space-y-2 ${editingRealisasiId ? 'bg-amber-50 border-amber-300' : 'bg-emerald-50 border-emerald-200'}`}>
-                    <div className="flex justify-between items-center">
-                      <p className={`font-black text-[11px] ${editingRealisasiId ? 'text-amber-700' : 'text-emerald-800'}`}>{editingRealisasiId ? '✏️ Edit Realisasi Belanja' : '+ Tambah Realisasi Belanja'}</p>
-                      {editingRealisasiId && (
-                        <button type="button" onClick={handleBatalEditRealisasiBelanja} className="text-[10px] font-bold text-amber-700 underline">Batalkan Edit</button>
-                      )}
-                    </div>
-                    {editingRealisasiId && (
-                      <p className="text-[10px] text-amber-700 -mt-1">Kosongkan field Tanggal kalau tidak ingin mengubah tanggal yang sudah tercatat.</p>
-                    )}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <div>
-                        <label className="block mb-1 text-slate-600">Tanggal</label>
-                        <input type="date" value={formRealisasiBaru.tanggal} onChange={(e) => setFormRealisasiBaru({...formRealisasiBaru, tanggal: e.target.value})} className="w-full border p-2 rounded-xl bg-white" />
-                      </div>
-                      <div>
-                        <label className="block mb-1 text-slate-600">Kategori</label>
-                        <select value={formRealisasiBaru.kategori} onChange={(e) => setFormRealisasiBaru({...formRealisasiBaru, kategori: e.target.value})} className="w-full border p-2 rounded-xl bg-white font-bold">
-                          <option>Kebersihan</option>
-                          <option>Keamanan</option>
-                          <option>Sosial</option>
-                          <option>Operasional</option>
-                          <option>Perbaikan Fasilitas</option>
-                          <option>Lain-lain</option>
-                        </select>
-                      </div>
-                      <div className="sm:col-span-2">
-                        <label className="block mb-1 text-slate-600">Keterangan</label>
-                        <input type="text" placeholder="mis. Perbaikan pos ronda Blok A" value={formRealisasiBaru.keterangan} onChange={(e) => setFormRealisasiBaru({...formRealisasiBaru, keterangan: e.target.value})} className="w-full border p-2 rounded-xl bg-white" />
-                      </div>
-                      <div>
-                        <label className="block mb-1 text-slate-600">Nominal (Rp)</label>
-                        <input type="number" min="0" placeholder="0" value={formRealisasiBaru.nominal} onChange={(e) => setFormRealisasiBaru({...formRealisasiBaru, nominal: e.target.value})} className="w-full border p-2 rounded-xl bg-white" />
-                      </div>
-                      <div>
-                        <label className="block mb-1 text-slate-600">Target Tampil</label>
-                        <select value={formRealisasiBaru.kelompok} onChange={(e) => setFormRealisasiBaru({...formRealisasiBaru, kelompok: e.target.value})} className="w-full border p-2 rounded-xl bg-white font-bold">
-                          <option value="Semua">Semua Kelompok</option>
-                          {kelompokList.map(k => <option key={k.id} value={k.nama}>{k.nama}</option>)}
-                        </select>
-                      </div>
-                      <div className="sm:col-span-2">
-                        <label className="block mb-1 text-slate-600">Bukti Foto Struk/Nota</label>
-                        <input type="file" accept="image/*" onChange={handleFotoRealisasiChange} className="w-full border p-2 rounded-xl bg-white text-[11px]" />
-                        {formRealisasiBaru.buktiUrl && (
-                          <div className="mt-2 flex items-center gap-2">
-                            <img loading="lazy" decoding="async" src={formRealisasiBaru.buktiUrl} alt="Preview" className="w-14 h-14 rounded-lg object-cover border" />
-                            <button type="button" onClick={() => setFormRealisasiBaru(prev => ({ ...prev, buktiUrl: null, buktiNamaFile: null }))} className="text-[10px] font-bold text-rose-600">Hapus Foto</button>
+                  {/* KOLOM KANAN: DAFTAR REALISASI BELANJA */}
+                  <div className="bg-white p-5 rounded-2xl border shadow-xs space-y-3">
+                    <h4 className="text-[11px] font-black text-slate-900 uppercase">Daftar Realisasi Belanja</h4>
+                    <div className="space-y-2 text-xs font-semibold max-h-[720px] overflow-y-auto pr-1">
+                      {realisasiBelanja.map(r => (
+                        <div key={r.id} className={`p-3 bg-slate-50 border rounded-xl flex justify-between items-center flex-wrap gap-2 ${editingRealisasiId === r.id ? 'ring-2 ring-amber-400' : ''}`}>
+                          <div className="min-w-0">
+                            <span className="inline-block text-[9px] font-black uppercase tracking-wide bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full mb-1">{r.kategori}</span>
+                            <p className="text-slate-900 font-bold text-[12px]">{r.keterangan}</p>
+                            <p className="text-slate-400 text-[11px]">{formatTanggalLaporan(r.tanggal)} • Rp {r.nominal.toLocaleString('id-ID')} • Target: {r.kelompok}</p>
                           </div>
-                        )}
-                      </div>
+                          <div className="flex gap-2 shrink-0">
+                            {r.buktiUrl && (
+                              <button onClick={() => setPreviewLampiran({ judul: r.keterangan, url: r.buktiUrl, namaFile: r.buktiNamaFile, tipe: 'gambar' })} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded-lg text-[11px]">📷 Bukti</button>
+                            )}
+                            <button onClick={() => handleEditRealisasiBelanja(r)} className="bg-amber-100 text-amber-700 px-2.5 py-1 rounded-lg font-black text-[11px]">Edit</button>
+                            <button onClick={() => handleHapusRealisasiBelanja(r.id)} className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded-lg text-[11px]">Hapus</button>
+                          </div>
+                        </div>
+                      ))}
+                      {realisasiBelanja.length === 0 && <p className="text-slate-400 italic">Belum ada realisasi belanja tercatat.</p>}
                     </div>
-                    <div className="flex justify-end pt-1">
-                      <button type="submit" className={`text-white font-bold px-4 py-1.5 rounded-xl text-[11px] ${editingRealisasiId ? 'bg-amber-600' : 'bg-emerald-700'}`}>{editingRealisasiId ? '💾 Simpan Perubahan' : '+ Simpan Realisasi'}</button>
-                    </div>
-                  </form>
+                  </div>
                 </div>
               </div>
             )}
