@@ -446,6 +446,7 @@ export default function IuranWargaRTApp() {
       kelompok: namaBlok,
       akses: 'user',
       statusRumah: idx % 2 === 0 ? 'Milik Sendiri' : 'Kontrak',
+      pengurus: false,
       anggotaKeluarga,
     };
   });
@@ -467,14 +468,14 @@ export default function IuranWargaRTApp() {
   // 2. DATABASE MASTER ANGGOTA
   // ==========================================
   const [members, setMembers] = useState([
-    { id: 'TR-01', nama: 'Hidayat', nomorRumah: 'Blok A No. 5', email: 'hidayat@mail.com', wa: '081234567890', alamat: 'Blok A No. 5, Perum Bumi Indah Proklamasi, RT 40/RW 08', target: 540000, bergabung: '10 Jan 2026', username: 'hidayat123', password: 'password123', statusAnggota: 'Aktif', kelompok: 'Blok A', akses: 'admin', statusRumah: 'Milik Sendiri', anggotaKeluarga: [
+    { id: 'TR-01', nama: 'Hidayat', nomorRumah: 'Blok A No. 5', email: 'hidayat@mail.com', wa: '081234567890', alamat: 'Blok A No. 5, Perum Bumi Indah Proklamasi, RT 40/RW 08', target: 540000, bergabung: '10 Jan 2026', username: 'hidayat123', password: 'password123', statusAnggota: 'Aktif', kelompok: 'Blok A', akses: 'admin', statusRumah: 'Milik Sendiri', pengurus: false, anggotaKeluarga: [
       { id: 'AK-01', nama: 'Ratna Sari', hubungan: 'Istri', jenisKelamin: 'Perempuan', tanggalLahir: '1990-04-12' },
       { id: 'AK-02', nama: 'Aditya Hidayat', hubungan: 'Anak ke-1', jenisKelamin: 'Laki-laki', tanggalLahir: '2015-08-20' },
     ] },
-    { id: 'TR-02', nama: 'Ahmad Fauzi', nomorRumah: 'Blok A No. 8', email: 'fauzi@mail.com', wa: '082211112222', alamat: 'Blok A No. 8, Perum Bumi Indah Proklamasi, RT 40/RW 08', target: 540000, bergabung: '12 Jan 2026', username: 'ahmadfauzi', password: 'password456', statusAnggota: 'Aktif', kelompok: 'Blok A', akses: 'user', statusRumah: 'Kontrak', anggotaKeluarga: [
+    { id: 'TR-02', nama: 'Ahmad Fauzi', nomorRumah: 'Blok A No. 8', email: 'fauzi@mail.com', wa: '082211112222', alamat: 'Blok A No. 8, Perum Bumi Indah Proklamasi, RT 40/RW 08', target: 540000, bergabung: '12 Jan 2026', username: 'ahmadfauzi', password: 'password456', statusAnggota: 'Aktif', kelompok: 'Blok A', akses: 'user', statusRumah: 'Kontrak', pengurus: false, anggotaKeluarga: [
       { id: 'AK-03', nama: 'Dewi Lestari', hubungan: 'Istri', jenisKelamin: 'Perempuan', tanggalLahir: '1993-11-02' },
     ] },
-    { id: 'TR-03', nama: 'Siti Aminah', nomorRumah: 'Blok B No. 3', email: 'siti@mail.com', wa: '085799998888', alamat: 'Blok B No. 3, Perum Bumi Indah Proklamasi, RT 40/RW 08', target: 540000, bergabung: '15 Jan 2026', username: 'sitiaminah', password: 'password789', statusAnggota: 'Pasif', kelompok: 'Blok B', akses: 'user', statusRumah: 'Milik Sendiri', anggotaKeluarga: [] },
+    { id: 'TR-03', nama: 'Siti Aminah', nomorRumah: 'Blok B No. 3', email: 'siti@mail.com', wa: '085799998888', alamat: 'Blok B No. 3, Perum Bumi Indah Proklamasi, RT 40/RW 08', target: 540000, bergabung: '15 Jan 2026', username: 'sitiaminah', password: 'password789', statusAnggota: 'Pasif', kelompok: 'Blok B', akses: 'user', statusRumah: 'Milik Sendiri', pengurus: false, anggotaKeluarga: [] },
     ...membersTambahanBlokFG, // contoh/dummy warga Blok F1-F14 & G1-G6, otomatis diganti data asli begitu tersambung Google Sheets
   ]);
 
@@ -507,6 +508,42 @@ export default function IuranWargaRTApp() {
     { id: 'SIM-WK-01', nama: 'Contoh Warga Keluar 1 (Simulasi)', blok: 'Blok C No. 9', tanggalKeluar: '2026-06-18' },
     { id: 'SIM-WK-02', nama: 'Contoh Warga Keluar 2 (Simulasi)', blok: 'Blok G3 No. 6', tanggalKeluar: '2026-05-30' },
   ];
+
+  // ==========================================
+  // DATA DUMMY "INFORMASI WARGA" KHUSUS SIMULASI (±50 KK)
+  // -----------------------------------------------------------
+  // Khusus untuk SIMULASI AKUN (isSimulatedSession), seluruh angka & grafik
+  // di menu "Informasi Warga" (Total KK, Total Jiwa, Laki-laki, Perempuan,
+  // Berdasarkan Usia, Status Rumah, Status Keanggotaan, Distribusi per Blok)
+  // memakai CONTOH/dummy tetap (bukan data warga asli), supaya pengunjung
+  // yang mencoba tombol Simulasi tidak melihat data pribadi warga sungguhan.
+  // Akun yang benar-benar login (hasil pendaftaran & aktivasi admin) TETAP
+  // memakai data ASLI dari `members` (lihat isSimulatedSession di bawah).
+  // ==========================================
+  const NAMA_BLOK_DUMMY_INFORMASI_WARGA = ['Blok A', 'Blok B', 'Blok C', 'Blok D', 'Blok F1', 'Blok F2', 'Blok G1'];
+  const INFORMASI_WARGA_DUMMY = Array.from({ length: 50 }, (_, idx) => {
+    const namaKK = `Contoh Warga ${idx + 1} (Simulasi)`;
+    const blokIni = NAMA_BLOK_DUMMY_INFORMASI_WARGA[idx % NAMA_BLOK_DUMMY_INFORMASI_WARGA.length];
+    const jumlahAnak = idx % 3; // variasi 0-2 anak per KK, supaya Berdasarkan Usia bervariasi
+    const anggotaKeluarga = [];
+    if (idx % 2 === 0) {
+      anggotaKeluarga.push({ id: `IWD-${idx}-p`, nama: `Pasangan ${namaKK}`, hubungan: 'Istri', jenisKelamin: idx % 4 === 0 ? 'Laki-laki' : 'Perempuan', tanggalLahir: '1988-05-10' });
+    }
+    for (let a = 0; a < jumlahAnak; a++) {
+      const tahunLahir = 2006 + ((idx + a) % 20); // sebar rentang usia: balita s/d dewasa muda
+      anggotaKeluarga.push({ id: `IWD-${idx}-a${a}`, nama: `Anak ke-${a + 1} ${namaKK}`, hubungan: `Anak ke-${a + 1}`, jenisKelamin: a % 2 === 0 ? 'Laki-laki' : 'Perempuan', tanggalLahir: `${tahunLahir}-0${(a % 9) + 1}-15` });
+    }
+    return {
+      id: `IWD-${idx + 1}`,
+      nama: namaKK,
+      nomorRumah: `${blokIni} No. ${(idx % 12) + 1}`,
+      kelompok: blokIni,
+      statusAnggota: idx % 9 === 0 ? 'Pasif' : 'Aktif',
+      statusRumah: idx % 3 === 0 ? 'Kontrak' : 'Milik Sendiri',
+      anggotaKeluarga,
+    };
+  });
+  const KELOMPOK_DUMMY_INFORMASI_WARGA = NAMA_BLOK_DUMMY_INFORMASI_WARGA.map((nama, idx) => ({ id: `GRP-SIM-IW-${idx + 1}`, nama, jenis: 'Rumah' }));
 
   // ==========================================
   // DATA WARGA KELUAR (WARGA YANG PINDAH/KELUAR DARI LINGKUNGAN RT)
@@ -1514,9 +1551,17 @@ export default function IuranWargaRTApp() {
 
   // ==========================================
   // REAL-TIME METRIC CALCULATION (ADMIN)
+  // -----------------------------------------------------------
+  // Total Kas Global & Sisa Tagihan di Dashboard Utama HANYA menghitung
+  // warga yang statusnya "Aktif" DAN bukan "Akun Pengurus" (lihat
+  // handleTogglePengurus). Warga Pasif otomatis tidak dihitung karena
+  // dianggap non-aktif/sudah tidak menghuni, sedangkan Akun Pengurus sengaja
+  // dikecualikan dari Keuangan RT walau tetap dihitung di Informasi Warga.
   // ==========================================
-  const totalDanaMasukGlobal = iuranMatrix.filter(r => r.status === 'LUNAS').reduce((acc, r) => acc + r.nominal, 0);
-  const totalSisaGlobal = members.reduce((acc, m) => acc + m.target, 0) - totalDanaMasukGlobal;
+  const anggotaUntukKeuanganRT = members.filter(m => m.statusAnggota !== 'Pasif' && !m.pengurus);
+  const namaUntukKeuanganRT = new Set(anggotaUntukKeuanganRT.map(m => m.nama));
+  const totalDanaMasukGlobal = iuranMatrix.filter(r => r.status === 'LUNAS' && namaUntukKeuanganRT.has(r.userNama)).reduce((acc, r) => acc + r.nominal, 0);
+  const totalSisaGlobal = anggotaUntukKeuanganRT.reduce((acc, m) => acc + m.target, 0) - totalDanaMasukGlobal;
   const totalVerifPendingGlobal = iuranMatrix.filter(r => r.status === 'MENUNGGU VERIFIKASI').reduce((acc, r) => acc + r.nominal, 0);
   const jumlahAktif = members.filter(m => m.statusAnggota === 'Aktif').length;
 
@@ -2752,6 +2797,28 @@ export default function IuranWargaRTApp() {
       showToast('Blok Rumah dan Nomor Rumah wajib dipilih.', 'error');
       return;
     }
+    // ==========================================
+    // KUNCI PENDAFTARAN GANDA (SATU BLOK + NOMOR RUMAH = SATU AKUN)
+    // -----------------------------------------------------------
+    // Dicek terhadap DUA sumber: (1) `members` -> akun yang sudah aktif, dan
+    // (2) `pengajuanBaru` -> pendaftaran lain yang masih menunggu aktivasi
+    // admin, supaya tidak ada dua pendaftaran nyangkut di Blok & Nomor Rumah
+    // yang sama sekalipun belum di-ACC admin. Kalau kombinasi Blok + Nomor
+    // Rumah yang dipilih sudah dipakai, pendaftaran DITOLAK & warga diarahkan
+    // menghubungi admin/pengurus RT untuk perubahan data (bukan didaftarkan
+    // ulang jadi akun baru).
+    // PENGECUALIAN: kalau akun LAMA di Blok & Nomor Rumah itu sudah di-set
+    // "Pasif" oleh admin (mis. penghuni lama sudah pindah/tidak aktif),
+    // kunci ini OTOMATIS TERBUKA - warga baru/pengganti di alamat yang sama
+    // tetap boleh mendaftar seperti biasa.
+    // ==========================================
+    const nomorRumahGabunganCek = `Blok ${formDaftar.blokRumah} No. ${formDaftar.nomorRumahUnit}`;
+    const sudahAdaAkunAktif = members.some(m => (m.nomorRumah || '').trim().toLowerCase() === nomorRumahGabunganCek.trim().toLowerCase() && m.statusAnggota !== 'Pasif');
+    const sudahAdaPengajuanLain = pengajuanBaru.some(r => (r.nomorRumah || '').trim().toLowerCase() === nomorRumahGabunganCek.trim().toLowerCase());
+    if (sudahAdaAkunAktif || sudahAdaPengajuanLain) {
+      showToast(`${nomorRumahGabunganCek} sudah terdaftar${sudahAdaAkunAktif ? ' dan memiliki akun aktif' : ', sedang menunggu aktivasi'}. Silakan hubungi admin/pengurus RT untuk perubahan data.`, 'error');
+      return;
+    }
     if (!formDaftar.alamat.trim()) {
       showToast('Alamat tinggal wajib diisi.', 'error');
       return;
@@ -2774,7 +2841,7 @@ export default function IuranWargaRTApp() {
         return;
       }
     }
-    const nomorRumahGabungan = `Blok ${formDaftar.blokRumah} No. ${formDaftar.nomorRumahUnit}`;
+    const nomorRumahGabungan = nomorRumahGabunganCek;
     updatePengajuan([...pengajuanBaru, {
       id: 'REQ-' + Math.floor(100 + Math.random() * 900),
       nama: formDaftar.nama, nomorRumah: nomorRumahGabungan, email: formDaftar.email, wa: formDaftar.wa, alamat: formDaftar.alamat, target: TARGET_TAHUNAN, tglDaftar: '11 Jul 2026',
@@ -2895,6 +2962,28 @@ export default function IuranWargaRTApp() {
     updateMembers(members.map(m => m.id === memberId ? { ...m, akses: aksesBaru } : m));
     if (activeUserSession.id === memberId) setActiveUserSession({ ...activeUserSession, akses: aksesBaru });
     showToast(`Akses ${target.nama} berhasil diubah menjadi ${aksesBaru === 'admin' ? 'Admin (akses penuh)' : 'User (akses terbatas)'}.`);
+  };
+
+  // ==========================================
+  // TANDAI/LEPAS "AKUN PENGURUS" (ADMIN)
+  // -----------------------------------------------------------
+  // Dipakai untuk warga yang menjabat pengurus RT (mis. Ketua RT, Sekretaris,
+  // Seksi, dll) - status ini TERPISAH dari `akses` (Admin/User panel) supaya
+  // seorang pengurus tetap bisa login sebagai akses "User" biasa. Efeknya
+  // HANYA pada rekap KEUANGAN RT di Dashboard Utama (Total Kas Global &
+  // Sisa Tagihan) - akun berlabel Pengurus TIDAK ikut dihitung target/kasnya
+  // di sana (lihat totalDanaMasukGlobal/totalSisaGlobal), tetapi tetap ikut
+  // dihitung penuh di menu Informasi Warga (data kependudukan tidak berubah).
+  // ==========================================
+  const handleTogglePengurus = (id) => {
+    const target = members.find(m => m.id === id);
+    if (!target) return;
+    const statusBaru = !target.pengurus;
+    const ok = window.confirm(`${statusBaru ? 'Tandai' : 'Lepas tanda'} "${target.nama}" sebagai Akun Pengurus?\n\n${statusBaru ? 'Target & pembayaran warga ini akan DIKELUARKAN dari rekap Keuangan RT di Dashboard Utama (Total Kas Global & Sisa Tagihan), tapi tetap dihitung penuh di Informasi Warga.' : 'Target & pembayaran warga ini akan MASUK KEMBALI ke rekap Keuangan RT di Dashboard Utama.'}`);
+    if (!ok) return;
+    updateMembers(members.map(m => m.id === id ? { ...m, pengurus: statusBaru } : m));
+    if (activeUserSession.id === id) setActiveUserSession({ ...activeUserSession, pengurus: statusBaru });
+    showToast(`"${target.nama}" ${statusBaru ? 'ditandai sebagai Akun Pengurus (dikecualikan dari Keuangan RT).' : 'sudah bukan Akun Pengurus lagi (masuk kembali ke Keuangan RT).'}`);
   };
 
   // GANTI PASSWORD OLEH USER SENDIRI
@@ -3825,23 +3914,37 @@ export default function IuranWargaRTApp() {
 
             {/* INFORMASI WARGA - DASHBOARD STATISTIK KEPENDUDUKAN (USER & ADMIN, HANYA SETELAH LOGIN) */}
             {activeMenu === 'informasi-warga' && (() => {
-              const dataWarga = role === 'admin' ? members : members.filter(m => m.kelompok === activeUserSession.kelompok);
+              // Sumber data: akun SIMULASI (isSimulatedSession) selalu pakai
+              // contoh/dummy ±50 KK (INFORMASI_WARGA_DUMMY), sedangkan akun
+              // yang benar-benar login (admin maupun user hasil pendaftaran
+              // asli) sama-sama melihat SELURUH data warga RT yang sebenarnya
+              // (bukan cuma blok sendiri) - hanya fitur "Lihat Rincian" &
+              // tabel Informasi Keluarga (Seluruh KK) yang tetap khusus Admin.
+              // Warga berstatus "Pasif" TIDAK ikut dihitung di seluruh rekap
+              // kependudukan di bawah (Total KK, Total Jiwa, Laki-laki/
+              // Perempuan, Berdasarkan Usia, Status Rumah, Distribusi per
+              // Blok) - dianggap sudah tidak menghuni/tidak aktif. "Akun
+              // Pengurus" TETAP dihitung penuh di sini (pengecualian pengurus
+              // hanya berlaku di rekap Keuangan RT, bukan data kependudukan).
+              const dataWargaSemua = isSimulatedSession ? INFORMASI_WARGA_DUMMY : members;
+              const dataWarga = dataWargaSemua.filter(m => m.statusAnggota !== 'Pasif');
               const totalKK = dataWarga.length;
               const totalAnggotaKeluarga = dataWarga.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
               const totalJiwa = totalKK + totalAnggotaKeluarga;
               const jmlMilikSendiri = dataWarga.filter(m => m.statusRumah === 'Milik Sendiri').length;
               const jmlKontrak = dataWarga.filter(m => m.statusRumah !== 'Milik Sendiri').length;
-              const jmlAktif = dataWarga.filter(m => m.statusAnggota === 'Aktif').length;
-              const jmlPasif = dataWarga.filter(m => m.statusAnggota === 'Pasif').length;
+              const jmlAktif = dataWargaSemua.filter(m => m.statusAnggota === 'Aktif').length;
+              const jmlPasif = dataWargaSemua.filter(m => m.statusAnggota === 'Pasif').length;
               const jmlPerempuanTanggungan = dataWarga.reduce((acc, m) => acc + (m.anggotaKeluarga || []).filter(a => a.jenisKelamin === 'Perempuan').length, 0);
               const jmlLakiTanggungan = dataWarga.reduce((acc, m) => acc + (m.anggotaKeluarga || []).filter(a => a.jenisKelamin === 'Laki-laki').length, 0);
               const rekapUsiaRT = getRekapKategoriUsia(dataWarga);
               const totalUsiaTerdata = Object.values(rekapUsiaRT).reduce((a, b) => a + b, 0);
               // REKAP WARGA PER BLOK - jumlah KK & jumlah jiwa (KK + seluruh anggota
-              // keluarga yang tercatat) per blok. Admin melihat SEMUA blok, akun
-              // user (warga) hanya melihat blok tempat tinggalnya sendiri saja.
-              const perBlokSemua = kelompokList.map(k => {
-                const anggotaBlokIni = members.filter(m => m.kelompok === k.nama);
+              // keluarga yang tercatat) per blok, SELALU seluruh blok RT (baik untuk
+              // Admin maupun akun user asli). Khusus SIMULASI AKUN, dihitung dari
+              // blok & data dummy (INFORMASI_WARGA_DUMMY), bukan blok/data asli.
+              const perBlokSemua = (isSimulatedSession ? KELOMPOK_DUMMY_INFORMASI_WARGA : kelompokList).map(k => {
+                const anggotaBlokIni = dataWarga.filter(m => m.kelompok === k.nama);
                 const jumlahKK = anggotaBlokIni.length;
                 const jumlahJiwa = jumlahKK + anggotaBlokIni.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
                 return { ...k, jumlahKK, jumlahJiwa };
@@ -3862,7 +3965,8 @@ export default function IuranWargaRTApp() {
                   <div>
                     <h3 className="text-sm font-black text-slate-900">📊 Informasi Warga</h3>
                     <p className="text-xs text-slate-400">
-                      {role === 'admin' ? 'Ringkasan data kependudukan seluruh warga RT, khusus untuk pengurus.' : `Ringkasan data kependudukan warga di ${activeUserSession.kelompok}.`}
+                      {role === 'admin' ? 'Ringkasan data kependudukan seluruh warga RT, khusus untuk pengurus.' : 'Ringkasan data kependudukan seluruh warga RT.'}
+                      {isSimulatedSession ? ' (Data contoh/simulasi.)' : ''}
                     </p>
                   </div>
 
@@ -3889,7 +3993,7 @@ export default function IuranWargaRTApp() {
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     {/* KOMPOSISI USIA */}
                     <div className="bg-white p-5 rounded-2xl border shadow-xs">
-                      <h4 className="text-xs font-extrabold text-slate-900 uppercase mb-3">Komposisi Usia (Anggota Keluarga)</h4>
+                      <h4 className="text-xs font-extrabold text-slate-900 uppercase mb-3">Berdasarkan Usia (Anggota Keluarga)</h4>
                       <div className="space-y-2">
                         {KATEGORI_USIA_LIST.map(kat => {
                           const jml = rekapUsiaRT[kat] || 0;
@@ -3950,7 +4054,7 @@ export default function IuranWargaRTApp() {
                         const persen = totalKK > 0 ? Math.round((k.jumlahKK / totalKK) * 100) : 0;
                         const rincianTerbuka = rincianBlokTerbuka === k.nama;
                         // Daftar KK & anggota keluarga di blok ini (khusus untuk rincian admin)
-                        const kkDiBlokIni = role === 'admin' ? members.filter(m => m.kelompok === k.nama) : [];
+                        const kkDiBlokIni = role === 'admin' ? dataWarga.filter(m => m.kelompok === k.nama) : [];
                         return (
                           <div key={k.id} className="text-[11px] font-semibold">
                             <div className="flex justify-between items-center mb-1">
@@ -4279,7 +4383,7 @@ export default function IuranWargaRTApp() {
                           <thead>
                             <tr className="text-slate-400 uppercase text-[9px] text-left border-b">
                               <th className="py-2 pr-2">Bulan</th>
-                              <th className="py-2 pr-2">Angsuran</th>
+                              <th className="py-2 pr-2">Pembayaran</th>
                               <th className="py-2 pr-2">Nominal</th>
                               <th className="py-2 pr-2">Status</th>
                               <th className="py-2 pr-2">Tanggal Bayar</th>
@@ -4723,6 +4827,9 @@ export default function IuranWargaRTApp() {
                                   <span className="text-[9px] font-bold text-slate-400 uppercase">Kepala Keluarga</span>
                                   <span className={`px-2 py-0.5 rounded text-[9px] font-black ${m.statusAnggota === 'Aktif' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600'}`}>{m.statusAnggota}</span>
                                   <span className="px-2 py-0.5 rounded text-[9px] font-black bg-slate-200 text-slate-600 capitalize">{m.akses}</span>
+                                  {m.pengurus && (
+                                    <span className="px-2 py-0.5 rounded text-[9px] font-black bg-sky-100 text-sky-700">Pengurus (di luar Keuangan RT)</span>
+                                  )}
                                 </div>
                                 <p className="text-[11px] text-slate-500 mt-1">📍 {m.alamat || m.nomorRumah} • Status Rumah: {m.statusRumah || '-'}</p>
                               </div>
@@ -5254,7 +5361,7 @@ export default function IuranWargaRTApp() {
                 <div className="bg-white p-6 rounded-2xl border shadow-xs space-y-4">
                   <div>
                     <h3 className="text-sm font-black text-slate-900">Manajemen Akses Warga</h3>
-                    <p className="text-[11px] text-slate-400 mt-0.5">Atur tingkat akses tiap warga yang sudah aktif. Contoh: ubah akses <strong>Hidayat</strong> menjadi Admin agar mendapat akses penuh (Admin Panel), atau kembalikan ke User untuk akses terbatas (Dashboard Warga saja).</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Atur tingkat akses tiap warga yang sudah aktif. Contoh: ubah akses <strong>Hidayat</strong> menjadi Admin agar mendapat akses penuh (Admin Panel), atau kembalikan ke User untuk akses terbatas (Dashboard Warga saja). Tandai <strong>Akun Pengurus</strong> untuk warga yang menjabat pengurus RT - target &amp; pembayaran mereka otomatis DIKELUARKAN dari rekap Keuangan RT di Dashboard Utama (Total Kas Global &amp; Sisa Tagihan), tapi tetap dihitung penuh di Informasi Warga.</p>
                   </div>
                   <div className="space-y-2 text-xs font-semibold">
                     {members.map(m => (
@@ -5264,7 +5371,17 @@ export default function IuranWargaRTApp() {
                           <p className="text-slate-400">{m.username} | {m.kelompok}</p>
                           <p className="text-slate-400 mt-0.5">Password: <span className="italic text-slate-300">tersembunyi (gunakan Reset Password)</span></p>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap justify-end">
+                          {m.pengurus && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-sky-100 text-sky-700">Akun Pengurus</span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleTogglePengurus(m.id)}
+                            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase transition-colors ${m.pengurus ? 'bg-sky-600 text-white hover:bg-sky-700' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
+                          >
+                            {m.pengurus ? 'Lepas Akun Pengurus' : 'Jadikan Akun Pengurus'}
+                          </button>
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${(m.akses || 'user') === 'admin' ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-600'}`}>
                             {(m.akses || 'user') === 'admin' ? 'Admin • Akses Penuh' : 'User • Akses Terbatas'}
                           </span>
