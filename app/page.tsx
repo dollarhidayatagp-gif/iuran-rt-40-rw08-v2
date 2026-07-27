@@ -924,7 +924,19 @@ export default function IuranWargaRTApp() {
       const dataTunggakan = semua.tunggakan || [];
 
       if (Array.isArray(dataAnggota) && dataAnggota.length) {
-        setMembers(dataAnggota.map(m => ({ ...m, target: Number(m.target) || 0, anggotaKeluarga: parseAnggotaKeluarga(m.anggotaKeluarga) })));
+        // PERBAIKAN: sebelumnya beberapa warga (yang datanya sempat bolak-balik
+        // lewat Google Sheets) menampilkan password kosong ("-") walau tombol
+        // "Lihat" sudah diklik. Penyebabnya, kolom "password" di Sheet kadang
+        // terbaca dengan variasi penulisan huruf besar/kecil (mis. "Password"),
+        // sehingga m.password (huruf kecil semua) jadi kosong walau nilainya
+        // sebenarnya ADA di baris tsb. Fallback di bawah ini mencoba semua
+        // kemungkinan nama kolom sebelum dianggap benar-benar tidak ada.
+        setMembers(dataAnggota.map(m => ({
+          ...m,
+          password: m.password || m.Password || m.PASSWORD || '',
+          target: Number(m.target) || 0,
+          anggotaKeluarga: parseAnggotaKeluarga(m.anggotaKeluarga)
+        })));
         setDataWargaAsliSudahMasuk(true);
       }
       if (Array.isArray(dataIuran)) {
@@ -3548,21 +3560,31 @@ export default function IuranWargaRTApp() {
         </div>
       )}
 
-      {/* POP UP TOTAL PENGUNJUNG WEBSITE - tampil sekali di awal (Web Utama),
-          dengan animasi angka berjalan (count-up) menuju angka final. */}
+      {/* KARTU TOTAL PENGUNJUNG WEBSITE - tampil sekali di awal (Web Utama),
+          untuk SEMUA pengguna (warga maupun admin, siapapun yang membuka
+          website), dengan animasi angka berjalan (count-up) menuju angka
+          final. Angka diambil dari action 'trackVisitor' di Google Apps
+          Script (lihat muatSemuaDataDariSheet / jalankanHitung di atas) -
+          jadi totalnya global, bukan cuma hitungan 1 perangkat.
+          Tampilan dibuat lebih elegan/profesional (kartu gelap minimalis,
+          ikon tren bersih) - TANPA ikon mata 👀 seperti versi sebelumnya. */}
       {showVisitorPopup && visitorTotal !== null && (
-        <div className="fixed inset-0 z-[110] flex items-start justify-center pt-20 px-4 pointer-events-none">
-          <div className="pointer-events-auto anim-pop bg-white border border-emerald-100 shadow-2xl rounded-2xl px-6 py-5 flex items-center gap-4 max-w-sm w-full">
-            <div className="w-12 h-12 rounded-full bg-emerald-50 flex items-center justify-center shrink-0 text-2xl">👀</div>
+        <div className="fixed bottom-5 left-5 right-5 sm:right-auto z-[110] flex justify-start pointer-events-none">
+          <div className="pointer-events-auto anim-pop bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 border border-white/10 shadow-2xl rounded-2xl px-5 py-4 flex items-center gap-3.5 max-w-sm w-full sm:w-auto">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-400/20 flex items-center justify-center shrink-0">
+              <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 text-emerald-400" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3 17.5 9 11l4 4 8-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M15 6h6v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Pengunjung Website</p>
-              <p className="text-3xl font-black text-emerald-700 tabular-nums leading-tight">{visitorDisplay.toLocaleString('id-ID')}</p>
-              <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Terima kasih sudah berkunjung 🙏</p>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Total Pengunjung Website</p>
+              <p className="text-2xl font-black text-white tabular-nums leading-tight">{visitorDisplay.toLocaleString('id-ID')}</p>
             </div>
             <button
               type="button"
               onClick={() => setShowVisitorPopup(false)}
-              className="shrink-0 w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 font-black text-xs flex items-center justify-center"
+              className="shrink-0 w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 font-black text-xs flex items-center justify-center transition-colors"
               aria-label="Tutup"
             >
               ✕
@@ -3668,7 +3690,7 @@ export default function IuranWargaRTApp() {
                   <p className="text-[10px] text-slate-400 mt-2">Pastikan hanya transfer ke rekening resmi di atas. Nomor ini diatur langsung oleh panitia lewat Admin Panel.</p>
                 </div>
                 <div className="bg-white p-5 rounded-2xl border">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Hubungi Panitia</h4>
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Hubungi Pengurus</h4>
                   <p className="text-slate-700 font-bold">{cmsTeks.infoKontakPanitia || cmsTeks.infoKontak}</p>
                   <a
                     href={buatLinkWhatsapp(cmsTeks.infoKontakPanitia || cmsTeks.infoKontak)}
@@ -5971,7 +5993,16 @@ export default function IuranWargaRTApp() {
                                     Username: <span className="font-mono text-slate-700">{m.username}</span>
                                   </span>
                                   <span className="text-slate-400 font-normal flex items-center gap-1.5 mt-0.5">
-                                    Password: <span className="font-mono text-slate-700">{visiblePasswordIds.includes(m.id) ? (m.password || '-') : '••••••••'}</span>
+                                    Password:{' '}
+                                    {visiblePasswordIds.includes(m.id) ? (
+                                      m.password ? (
+                                        <span className="font-mono text-slate-700">{m.password}</span>
+                                      ) : (
+                                        <span className="italic text-rose-500">belum ada, klik Reset Password</span>
+                                      )
+                                    ) : (
+                                      <span className="font-mono text-slate-700">••••••••</span>
+                                    )}
                                     <button type="button" onClick={() => togglePasswordVisibility(m.id)} className="text-emerald-700 font-bold text-[10px] underline underline-offset-2">
                                       {visiblePasswordIds.includes(m.id) ? 'Sembunyikan' : 'Lihat'}
                                     </button>
@@ -6118,7 +6149,7 @@ export default function IuranWargaRTApp() {
                       <div><label className="block text-slate-600 mb-1">Alamat RT (KOP)</label><input type="text" value={cmsForm.alamatRT} onChange={(e) => setCmsForm({...cmsForm, alamatRT: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">No. Rekening (tampil di Web Utama)</label><input type="text" value={cmsForm.noRekening} onChange={(e) => setCmsForm({...cmsForm, noRekening: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">No. WhatsApp Kontak - "Hubungi Kami" di Header (tombol Chat WA otomatis mengikuti nomor ini)</label><input type="text" placeholder="08xxxxxxxxxx" value={cmsForm.infoKontak} onChange={(e) => setCmsForm({...cmsForm, infoKontak: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
-                      <div><label className="block text-slate-600 mb-1">No. WhatsApp Pengurus - "Hubungi Panitia" (boleh beda dari nomor di atas, kosongkan untuk ikut nomor "Hubungi Kami")</label><input type="text" placeholder="08xxxxxxxxxx" value={cmsForm.infoKontakPanitia} onChange={(e) => setCmsForm({...cmsForm, infoKontakPanitia: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
+                      <div><label className="block text-slate-600 mb-1">No. WhatsApp Pengurus - "Hubungi Pengurus" (boleh beda dari nomor di atas, kosongkan untuk ikut nomor "Hubungi Kami")</label><input type="text" placeholder="08xxxxxxxxxx" value={cmsForm.infoKontakPanitia} onChange={(e) => setCmsForm({...cmsForm, infoKontakPanitia: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">Judul Banner Utama</label><input type="text" value={cmsForm.judulBeranda} onChange={(e) => setCmsForm({...cmsForm, judulBeranda: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">Nama Program / Subjudul</label><input type="text" value={cmsForm.subJudulBeranda} onChange={(e) => setCmsForm({...cmsForm, subJudulBeranda: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">Papan Pengumuman</label><textarea rows={2} value={cmsForm.pengumuman} onChange={(e) => setCmsForm({...cmsForm, pengumuman: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
