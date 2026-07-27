@@ -187,6 +187,11 @@ export default function IuranWargaRTApp() {
     tagline: 'Tertib bayar iuran, lingkungan nyaman, warga sejahtera bersama',
     pengumuman: 'Pembayaran iuran bulan berjalan sudah dibuka. Silakan melakukan pembayaran dan upload bukti transfer sebelum tanggal 10 setiap bulannya ke rekening resmi RT.',
     infoKontak: '0822-9728-1391',
+    // NOMOR WHATSAPP PENGURUS/PANITIA - dipakai khusus di kotak "Hubungi
+    // Panitia" (Web Utama), TERPISAH dari infoKontak ("Hubungi Kami" di
+    // header) supaya admin bisa mengatur nomor pengurus yang berbeda kalau
+    // perlu. Kalau dikosongkan, otomatis fallback memakai infoKontak.
+    infoKontakPanitia: '0822-9728-1391',
     fotoLatarRT: null,
     logoRT: null,
     // TANDA TANGAN DIGITAL BENDAHARA RT - URL gambar tanda tangan (upload dari
@@ -979,7 +984,7 @@ export default function IuranWargaRTApp() {
         }));
       }
       setSheetStatus('synced');
-      if (!sunyi) showToast('Seluruh data website berhasil dimuat dari Google Sheets.');
+      if (!sunyi) showToast('Proses Completed');
     } catch (err) {
       console.error(err);
       setSheetStatus('error');
@@ -1239,6 +1244,101 @@ export default function IuranWargaRTApp() {
     window.clearTimeout(showToast._t);
     showToast._t = window.setTimeout(() => setToast(null), 3200);
   };
+
+  // ==========================================
+  // POP UP JUMLAH PENGUNJUNG WEBSITE (WEB UTAMA)
+  // -----------------------------------------------------------
+  // Menghitung total pengunjung lalu menampilkannya sebagai pop up di
+  // halaman Beranda/Web Utama begitu halaman pertama kali dibuka, dengan
+  // animasi angka berjalan (count-up) menuju angka total terakhir.
+  //
+  // SUMBER ANGKA:
+  //  1) Kalau Google Apps Script sudah tersambung (cmsTeks.appsScriptUrl
+  //     terisi) DAN Code.gs milik panitia sudah punya action 'trackVisitor'
+  //     (menambah +1 lalu mengembalikan { total: <angka> }), angka yang
+  //     dipakai adalah angka GLOBAL asli dari Google Sheets (akurat untuk
+  //     SEMUA pengunjung, semua perangkat).
+  //  2) Kalau belum tersambung / Code.gs belum punya action tsb (fetch
+  //     gagal / hasilnya bukan angka), aplikasi otomatis fallback memakai
+  //     hitungan LOKAL per-browser (localStorage) supaya popup tetap
+  //     berfungsi walau belum ada backend - namun angka ini hanya
+  //     memantau kunjungan dari browser/perangkat itu sendiri, bukan
+  //     gabungan semua pengunjung. Untuk hitungan global sungguhan,
+  //     tambahkan action 'trackVisitor' di Code.gs panitia.
+  // Dipakai sessionStorage supaya 1 kunjungan (1 sesi tab) hanya dihitung
+  // SEKALI walau pengunjung pindah-pindah tab Web Utama/Dashboard di app ini.
+  // ==========================================
+  const [visitorTotal, setVisitorTotal] = useState(null); // angka final/target
+  const [visitorDisplay, setVisitorDisplay] = useState(0); // angka yang sedang dianimasikan
+  const [showVisitorPopup, setShowVisitorPopup] = useState(false);
+  const visitorPopupSudahTampilRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (visitorPopupSudahTampilRef.current) return; // hanya sekali per pemuatan app
+    visitorPopupSudahTampilRef.current = true;
+
+    const SESSION_KEY = 'iuran_rt_visitor_counted_session';
+    const LOCAL_KEY = 'iuran_rt_visitor_total_local';
+    const sudahDihitungSesiIni = window.sessionStorage.getItem(SESSION_KEY);
+
+    const hitungLokalFallback = () => {
+      let totalLokal = parseInt(window.localStorage.getItem(LOCAL_KEY) || '0', 10);
+      if (!totalLokal || isNaN(totalLokal)) {
+        // Angka awal biar tampilan tidak mulai dari 0/1 saat pertama kali dipakai.
+        totalLokal = 128;
+      }
+      if (!sudahDihitungSesiIni) {
+        totalLokal += 1;
+        window.localStorage.setItem(LOCAL_KEY, String(totalLokal));
+      }
+      return totalLokal;
+    };
+
+    const jalankanHitung = async () => {
+      let totalAkhir = null;
+      if (!sudahDihitungSesiIni && cmsTeks.appsScriptUrl) {
+        try {
+          const hasil = await sheetFetch(cmsTeks.appsScriptUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'trackVisitor' }),
+          });
+          if (hasil && typeof hasil.total === 'number' && !isNaN(hasil.total)) {
+            totalAkhir = hasil.total;
+          }
+        } catch (e) {
+          totalAkhir = null; // biarkan fallback lokal di bawah yang menangani
+        }
+      }
+      if (totalAkhir === null) totalAkhir = hitungLokalFallback();
+      if (!sudahDihitungSesiIni) window.sessionStorage.setItem(SESSION_KEY, '1');
+
+      setVisitorTotal(totalAkhir);
+      setShowVisitorPopup(true);
+    };
+
+    jalankanHitung();
+  }, []);
+
+  // ANIMASI COUNT-UP: angka berjalan naik dari 0 menuju visitorTotal begitu
+  // popup tampil, memakai easing sederhana supaya laju angka melambat di akhir.
+  useEffect(() => {
+    if (visitorTotal === null || !showVisitorPopup) return;
+    const durasiMs = 1400;
+    const mulai = performance.now();
+    let frameId;
+    const animasikan = (sekarang) => {
+      const progres = Math.min(1, (sekarang - mulai) / durasiMs);
+      const eased = 1 - Math.pow(1 - progres, 3);
+      setVisitorDisplay(Math.round(eased * visitorTotal));
+      if (progres < 1) frameId = requestAnimationFrame(animasikan);
+    };
+    frameId = requestAnimationFrame(animasikan);
+    // Popup otomatis hilang sendiri setelah beberapa detik, tetap bisa ditutup manual.
+    const timeoutTutup = window.setTimeout(() => setShowVisitorPopup(false), 5500);
+    return () => { cancelAnimationFrame(frameId); window.clearTimeout(timeoutTutup); };
+  }, [visitorTotal, showVisitorPopup]);
 
   // ==========================================
   // STATE MODAL, EMAIL SIMULASI & PENDAFTARAN BARU
@@ -1876,6 +1976,7 @@ export default function IuranWargaRTApp() {
       tagline: cmsForm.tagline,
       pengumuman: cmsForm.pengumuman,
       infoKontak: cmsForm.infoKontak,
+      infoKontakPanitia: cmsForm.infoKontakPanitia,
       visi: cmsForm.visi,
       misi: cmsForm.misi,
       syaratList: cmsForm.syaratText.split('\n').map(s => s.trim()).filter(Boolean),
@@ -3447,6 +3548,29 @@ export default function IuranWargaRTApp() {
         </div>
       )}
 
+      {/* POP UP TOTAL PENGUNJUNG WEBSITE - tampil sekali di awal (Web Utama),
+          dengan animasi angka berjalan (count-up) menuju angka final. */}
+      {showVisitorPopup && visitorTotal !== null && (
+        <div className="fixed inset-0 z-[110] flex items-start justify-center pt-20 px-4 pointer-events-none">
+          <div className="pointer-events-auto anim-pop bg-white border border-emerald-100 shadow-2xl rounded-2xl px-6 py-5 flex items-center gap-4 max-w-sm w-full">
+            <div className="w-12 h-12 rounded-full bg-emerald-50 flex items-center justify-center shrink-0 text-2xl">👀</div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Pengunjung Website</p>
+              <p className="text-3xl font-black text-emerald-700 tabular-nums leading-tight">{visitorDisplay.toLocaleString('id-ID')}</p>
+              <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Terima kasih sudah berkunjung 🙏</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowVisitorPopup(false)}
+              className="shrink-0 w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 font-black text-xs flex items-center justify-center"
+              aria-label="Tutup"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* SIMULATOR SWITCHER HEADER */}
       <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white px-3 sm:px-6 py-2.5 text-xs font-bold flex flex-wrap justify-between items-center gap-y-2 border-b border-emerald-900 shadow-md">
         <div className="flex items-center gap-2 min-w-0 overflow-hidden whitespace-nowrap">
@@ -3545,9 +3669,9 @@ export default function IuranWargaRTApp() {
                 </div>
                 <div className="bg-white p-5 rounded-2xl border">
                   <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Hubungi Panitia</h4>
-                  <p className="text-slate-700 font-bold">{cmsTeks.infoKontak}</p>
+                  <p className="text-slate-700 font-bold">{cmsTeks.infoKontakPanitia || cmsTeks.infoKontak}</p>
                   <a
-                    href={buatLinkWhatsapp(cmsTeks.infoKontak)}
+                    href={buatLinkWhatsapp(cmsTeks.infoKontakPanitia || cmsTeks.infoKontak)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="mt-2 inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] px-3 py-1.5 rounded-full transition-colors duration-200"
@@ -5846,6 +5970,12 @@ export default function IuranWargaRTApp() {
                                   <span className="text-slate-400 font-normal mt-0.5">
                                     Username: <span className="font-mono text-slate-700">{m.username}</span>
                                   </span>
+                                  <span className="text-slate-400 font-normal flex items-center gap-1.5 mt-0.5">
+                                    Password: <span className="font-mono text-slate-700">{visiblePasswordIds.includes(m.id) ? (m.password || '-') : '••••••••'}</span>
+                                    <button type="button" onClick={() => togglePasswordVisibility(m.id)} className="text-emerald-700 font-bold text-[10px] underline underline-offset-2">
+                                      {visiblePasswordIds.includes(m.id) ? 'Sembunyikan' : 'Lihat'}
+                                    </button>
+                                  </span>
                                 </div>
                               </div>
                               <div className="flex items-center gap-3">
@@ -5987,7 +6117,8 @@ export default function IuranWargaRTApp() {
                       <div><label className="block text-slate-600 mb-1">Nama RT (KOP)</label><input type="text" value={cmsForm.namaRT} onChange={(e) => setCmsForm({...cmsForm, namaRT: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">Alamat RT (KOP)</label><input type="text" value={cmsForm.alamatRT} onChange={(e) => setCmsForm({...cmsForm, alamatRT: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">No. Rekening (tampil di Web Utama)</label><input type="text" value={cmsForm.noRekening} onChange={(e) => setCmsForm({...cmsForm, noRekening: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
-                      <div><label className="block text-slate-600 mb-1">No. WhatsApp Kontak (tombol Chat WA otomatis mengikuti nomor ini)</label><input type="text" placeholder="08xxxxxxxxxx" value={cmsForm.infoKontak} onChange={(e) => setCmsForm({...cmsForm, infoKontak: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
+                      <div><label className="block text-slate-600 mb-1">No. WhatsApp Kontak - "Hubungi Kami" di Header (tombol Chat WA otomatis mengikuti nomor ini)</label><input type="text" placeholder="08xxxxxxxxxx" value={cmsForm.infoKontak} onChange={(e) => setCmsForm({...cmsForm, infoKontak: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
+                      <div><label className="block text-slate-600 mb-1">No. WhatsApp Pengurus - "Hubungi Panitia" (boleh beda dari nomor di atas, kosongkan untuk ikut nomor "Hubungi Kami")</label><input type="text" placeholder="08xxxxxxxxxx" value={cmsForm.infoKontakPanitia} onChange={(e) => setCmsForm({...cmsForm, infoKontakPanitia: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">Judul Banner Utama</label><input type="text" value={cmsForm.judulBeranda} onChange={(e) => setCmsForm({...cmsForm, judulBeranda: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">Nama Program / Subjudul</label><input type="text" value={cmsForm.subJudulBeranda} onChange={(e) => setCmsForm({...cmsForm, subJudulBeranda: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">Papan Pengumuman</label><textarea rows={2} value={cmsForm.pengumuman} onChange={(e) => setCmsForm({...cmsForm, pengumuman: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
