@@ -172,41 +172,77 @@ export default function IuranWargaRTApp() {
   // -----------------------------------------------------------
   // PENTING: TIDAK memakai Google Apps Script (Code.gs) sama sekali, sesuai
   // permintaan supaya backend Sheets tidak perlu diubah/deploy ulang.
-  // Angka ini disimpan lewat penyimpanan bawaan (shared storage) supaya
-  // SEMUA orang yang membuka website melihat angka yang SAMA & terus naik:
-  // contoh - User A buka -> lihat 131, lalu User B buka -> otomatis
-  // menjadi 132, User C buka -> 133, dst (dihitung tiap kali halaman ini
-  // pertama kali dimuat/dibuka).
-  // Kalau storage tidak tersedia (mis. dijalankan di luar Claude Artifacts),
-  // otomatis fallback ke hitungan lokal saja supaya tampilan tetap jalan.
+  //
+  // PERBAIKAN (versi sebelumnya belum tampil sama sekali di website
+  // produksi Anda): `window.storage` yang dipakai sebelumnya HANYA
+  // tersedia saat file ini dipratinjau LANGSUNG di dalam Claude.ai
+  // (fitur "Artifacts"). Begitu kode ini di-deploy ke website Anda sendiri
+  // (di luar Claude.ai), `window.storage` tidak pernah ada, sehingga
+  // sebelumnya kode ini gagal (masuk jalur fallback yang keliru & bikin
+  // angkanya kelihatan tidak jalan/tidak muncul).
+  //
+  // Sekarang alurnya jadi 3 lapis, otomatis dipilih sesuai tempat kode ini
+  // berjalan:
+  //   1) Kalau dipratinjau di Claude.ai -> tetap pakai window.storage.
+  //   2) Kalau di website ASLI Anda (produksi) -> pakai layanan counter
+  //      publik gratis "CountAPI" (https://countapi.xyz) lewat fetch biasa.
+  //      Ini pihak ketiga gratis di luar Anthropic, dipakai luas untuk
+  //      counter sederhana seperti ini & TIDAK perlu server/Apps Script
+  //      tambahan sama sekali.
+  //   3) Kalau dua-duanya gagal (mis. sedang offline) -> fallback angka
+  //      lokal saja supaya tampilan tetap ada isinya (walau tidak sinkron).
+  // Contoh: User A buka -> lihat 131, User B buka -> otomatis 132, dst.
   // ==========================================
   const [totalPengunjung, setTotalPengunjung] = useState(null);
   useEffect(() => {
     let sudahDilepas = false;
+    const KUNCI_PENGUNJUNG = 'total-pengunjung-web-utama';
+    const ANGKA_AWAL = 130; // titik awal, supaya pengunjung pertama langsung lihat 131
+
     (async () => {
-      const KUNCI_PENGUNJUNG = 'total-pengunjung-web-utama';
-      const ANGKA_AWAL = 130; // titik awal simulasi, supaya pengunjung pertama langsung lihat 131
+      // LAPIS 1: window.storage - hanya ada saat dipratinjau di Claude.ai
       try {
-        if (typeof window === 'undefined' || !window.storage) throw new Error('storage tidak tersedia');
-        let angkaSekarang = ANGKA_AWAL;
-        try {
-          const existing = await window.storage.get(KUNCI_PENGUNJUNG, true);
-          if (existing && existing.value !== undefined && existing.value !== null) {
-            const parsed = parseInt(existing.value, 10);
-            if (!Number.isNaN(parsed)) angkaSekarang = parsed;
+        if (typeof window !== 'undefined' && window.storage) {
+          let angkaSekarang = ANGKA_AWAL;
+          try {
+            const existing = await window.storage.get(KUNCI_PENGUNJUNG, true);
+            if (existing && existing.value !== undefined && existing.value !== null) {
+              const parsed = parseInt(existing.value, 10);
+              if (!Number.isNaN(parsed)) angkaSekarang = parsed;
+            }
+          } catch (errBaca) {
+            angkaSekarang = ANGKA_AWAL; // key belum pernah dibuat
           }
-        } catch (errBaca) {
-          // key belum pernah dibuat -> mulai dari ANGKA_AWAL
-          angkaSekarang = ANGKA_AWAL;
+          const angkaBaru = angkaSekarang + 1;
+          await window.storage.set(KUNCI_PENGUNJUNG, String(angkaBaru), true);
+          if (!sudahDilepas) setTotalPengunjung(angkaBaru);
+          return;
         }
-        const angkaBaru = angkaSekarang + 1;
-        await window.storage.set(KUNCI_PENGUNJUNG, String(angkaBaru), true);
-        if (!sudahDilepas) setTotalPengunjung(angkaBaru);
       } catch (errStorage) {
-        // FALLBACK: storage global tidak tersedia, tetap tampilkan angka lokal
-        if (!sudahDilepas) setTotalPengunjung((prev) => (prev || ANGKA_AWAL) + 1);
+        // lanjut ke Lapis 2 di bawah
       }
+
+      // LAPIS 2: DI WEBSITE PRODUKSI SUNGGUHAN - pakai CountAPI (gratis,
+      // publik, tanpa perlu server sendiri) supaya angka SAMA & terus naik
+      // untuk SEMUA pengunjung sungguhan, tanpa mengubah Apps Script.
+      try {
+        const namespace = 'rt40rw08-iuran-warga-perum-bumi-indah-proklamasi';
+        const resp = await fetch(`https://api.countapi.xyz/hit/${namespace}/${KUNCI_PENGUNJUNG}`);
+        const data = await resp.json();
+        if (data && typeof data.value === 'number') {
+          if (!sudahDilepas) setTotalPengunjung(data.value + ANGKA_AWAL);
+          return;
+        }
+        throw new Error('Respons CountAPI tidak valid');
+      } catch (errCountApi) {
+        // lanjut ke Lapis 3 (fallback lokal) di bawah
+      }
+
+      // LAPIS 3: FALLBACK TERAKHIR (mis. sedang offline) - angka lokal saja,
+      // supaya kotak counter tetap tampil ada isinya walau tidak tersinkron.
+      if (!sudahDilepas) setTotalPengunjung((prev) => (prev || ANGKA_AWAL) + 1);
     })();
+
     return () => { sudahDilepas = true; };
   }, []);
 
