@@ -555,6 +555,21 @@ export default function IuranWargaRTApp() {
     status: 'Progress',
     tglDibuat: '15 Jul 2026',
   }));
+  // DAFTAR BLOK KHUSUS SIMULASI (BERDIRI SENDIRI, TIDAK IKUT `kelompokList`).
+  // -----------------------------------------------------------
+  // PENTING: `kelompokList` (state) SELALU ditimpa otomatis oleh data ASLI
+  // dari Google Sheets begitu Sheets terhubung (lihat useEffect fetch di
+  // atas: setKelompokList dipanggil tanpa syarat kosong/tidaknya array).
+  // Karena itu daftar blok untuk tampilan SIMULASI tidak boleh ikut memakai
+  // `kelompokList` - harus daftar sendiri (tetap 22 blok: Blok A, Blok B,
+  // F1-F14, G1-G6) supaya kartu "Rekap Blok Rumah" versi simulasi selalu
+  // lengkap 22 blok, tidak ikut berubah/berkurang mengikuti isi Sheet asli.
+  // ==========================================
+  const KELOMPOK_DUMMY_REKAP_BLOK = [
+    { id: 'SIM-GRP-A', nama: 'Blok A', jenis: 'Rumah', kapasitas: 50, status: 'Progress', tglDibuat: '11 Jul 2026' },
+    { id: 'SIM-GRP-B', nama: 'Blok B', jenis: 'Rumah', kapasitas: 50, status: 'Progress', tglDibuat: '11 Jul 2026' },
+    ...kelompokTambahanBlokFG,
+  ];
   // Diambil 2 contoh (1 dari Blok F, 1 dari Blok G) dari dataset DUMMY di
   // atas supaya tombol "Simulasi Akun Pengguna" di Web Utama juga bisa
   // langsung memperlihatkan tampilan Dashboard & Rekap Blok Rumah untuk
@@ -5138,6 +5153,12 @@ export default function IuranWargaRTApp() {
               // BENAR-BENAR login (isSimulatedSession === false) tetap memakai
               // `members` ASLI dari Google Sheets, walau datanya masih sedikit/kosong.
               const anggotaSemuaUntukTampil = isSimulatedSession ? MEMBERS_DUMMY_REKAP_BLOK : members;
+              // PENTING: `kelompokList` (state) otomatis ditimpa data ASLI dari Google
+              // Sheets begitu Sheets terhubung - jadi untuk tampilan SIMULASI, daftar
+              // bloknya JUGA harus pakai daftar dummy sendiri (KELOMPOK_DUMMY_REKAP_BLOK,
+              // tetap 22 blok), bukan `kelompokList` yang bisa saja sudah berubah
+              // mengikuti isi Sheet asli (misalnya baru ada sebagian blok saja).
+              const kelompokUntukTampil = isSimulatedSession ? KELOMPOK_DUMMY_REKAP_BLOK : kelompokList;
               return (
               <div className="space-y-6">
                 <div className="bg-white p-6 rounded-2xl border shadow-xs space-y-6">
@@ -5147,7 +5168,7 @@ export default function IuranWargaRTApp() {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-xs font-semibold">
-                    {kelompokList.map(k => {
+                    {kelompokUntukTampil.map(k => {
                       // Rekap Blok Rumah sekarang SAMA untuk Admin maupun akun user
                       // (warga) - menampilkan seluruh KK di tiap blok, bukan hanya
                       // keluarga sendiri, supaya warga bisa lihat data seluruh RT.
@@ -5193,7 +5214,7 @@ export default function IuranWargaRTApp() {
                         </div>
                       );
                     })}
-                    {kelompokList.length === 0 && <p className="text-slate-400 italic sm:col-span-2">Belum ada kelompok dibuat.</p>}
+                    {kelompokUntukTampil.length === 0 && <p className="text-slate-400 italic sm:col-span-2">Belum ada kelompok dibuat.</p>}
                   </div>
                 </div>
 
