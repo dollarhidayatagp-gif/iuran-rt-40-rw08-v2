@@ -111,6 +111,12 @@ export default function IuranWargaRTApp() {
       .anim-pop { animation: popIn 0.25s ease both; }
       .app-root nav button, .app-root .menu-btn { transition: background-color 0.25s ease, color 0.25s ease, transform 0.15s ease; }
       .app-root nav button:active, .app-root .menu-btn:active { transform: scale(0.97); }
+      /* RUNNING TEXT (MARQUEE) - dipakai di kotak hijau bawah jam digital Beranda,
+         teks berjalan terus-menerus dari kanan ke kiri secara loop tanpa putus. */
+      @keyframes marqueeBerjalan { from { transform: translateX(0%); } to { transform: translateX(-50%); } }
+      .marquee-wrap { overflow: hidden; white-space: nowrap; }
+      .marquee-track { display: inline-flex; width: max-content; animation: marqueeBerjalan 14s linear infinite; }
+      .marquee-track span { padding-right: 3rem; }
     `;
     document.head.appendChild(styleEl);
   }, []);
@@ -162,6 +168,49 @@ export default function IuranWargaRTApp() {
   const [tanggalSekarang, setTanggalSekarang] = useState('');
 
   // ==========================================
+  // COUNTER PENGUNJUNG WEB (SHARED/GLOBAL, BUKAN PER-BROWSER)
+  // -----------------------------------------------------------
+  // PENTING: TIDAK memakai Google Apps Script (Code.gs) sama sekali, sesuai
+  // permintaan supaya backend Sheets tidak perlu diubah/deploy ulang.
+  // Angka ini disimpan lewat penyimpanan bawaan (shared storage) supaya
+  // SEMUA orang yang membuka website melihat angka yang SAMA & terus naik:
+  // contoh - User A buka -> lihat 131, lalu User B buka -> otomatis
+  // menjadi 132, User C buka -> 133, dst (dihitung tiap kali halaman ini
+  // pertama kali dimuat/dibuka).
+  // Kalau storage tidak tersedia (mis. dijalankan di luar Claude Artifacts),
+  // otomatis fallback ke hitungan lokal saja supaya tampilan tetap jalan.
+  // ==========================================
+  const [totalPengunjung, setTotalPengunjung] = useState(null);
+  useEffect(() => {
+    let sudahDilepas = false;
+    (async () => {
+      const KUNCI_PENGUNJUNG = 'total-pengunjung-web-utama';
+      const ANGKA_AWAL = 130; // titik awal simulasi, supaya pengunjung pertama langsung lihat 131
+      try {
+        if (typeof window === 'undefined' || !window.storage) throw new Error('storage tidak tersedia');
+        let angkaSekarang = ANGKA_AWAL;
+        try {
+          const existing = await window.storage.get(KUNCI_PENGUNJUNG, true);
+          if (existing && existing.value !== undefined && existing.value !== null) {
+            const parsed = parseInt(existing.value, 10);
+            if (!Number.isNaN(parsed)) angkaSekarang = parsed;
+          }
+        } catch (errBaca) {
+          // key belum pernah dibuat -> mulai dari ANGKA_AWAL
+          angkaSekarang = ANGKA_AWAL;
+        }
+        const angkaBaru = angkaSekarang + 1;
+        await window.storage.set(KUNCI_PENGUNJUNG, String(angkaBaru), true);
+        if (!sudahDilepas) setTotalPengunjung(angkaBaru);
+      } catch (errStorage) {
+        // FALLBACK: storage global tidak tersedia, tetap tampilkan angka lokal
+        if (!sudahDilepas) setTotalPengunjung((prev) => (prev || ANGKA_AWAL) + 1);
+      }
+    })();
+    return () => { sudahDilepas = true; };
+  }, []);
+
+  // ==========================================
   // NOTIFIKASI DALAM AKUN (BADGE "BELUM DIBACA") - USER & ADMIN
   // -----------------------------------------------------------
   // Setiap ada peristiwa penting (warga upload bukti transfer, admin
@@ -187,11 +236,6 @@ export default function IuranWargaRTApp() {
     tagline: 'Tertib bayar iuran, lingkungan nyaman, warga sejahtera bersama',
     pengumuman: 'Pembayaran iuran bulan berjalan sudah dibuka. Silakan melakukan pembayaran dan upload bukti transfer sebelum tanggal 10 setiap bulannya ke rekening resmi RT.',
     infoKontak: '0822-9728-1391',
-    // NOMOR WHATSAPP PENGURUS/PANITIA - dipakai khusus di kotak "Hubungi
-    // Panitia" (Web Utama), TERPISAH dari infoKontak ("Hubungi Kami" di
-    // header) supaya admin bisa mengatur nomor pengurus yang berbeda kalau
-    // perlu. Kalau dikosongkan, otomatis fallback memakai infoKontak.
-    infoKontakPanitia: '0822-9728-1391',
     fotoLatarRT: null,
     logoRT: null,
     // TANDA TANGAN DIGITAL BENDAHARA RT - URL gambar tanda tangan (upload dari
@@ -422,7 +466,7 @@ export default function IuranWargaRTApp() {
   });
 
   // ==========================================
-  // DATA SIMULASI TAMBAHAN: BLOK F1-F14 & G1-G6 (CONTOH/DUMMY)
+  // DATA SIMULASI TAMBAHAN: BLOK A, B, F1-F14 & G1-G6 (CONTOH/DUMMY) — TOTAL 50 KK
   // -----------------------------------------------------------
   // Ditambahkan sebagai gambaran bagaimana "Rekap Blok Rumah" akan tampil
   // otomatis setelah admin membuat banyak blok & mengisi banyak data warga
@@ -433,6 +477,14 @@ export default function IuranWargaRTApp() {
   // otomatis MENGGANTIKAN seluruh data contoh ini (lihat useEffect fetch
   // di atas: setMembers/setKelompokList hanya dipanggil kalau data Sheets
   // tidak kosong).
+  //
+  // PERUBAHAN: sebelumnya tiap blok F/G hanya diisi 1 KK contoh (banyak
+  // blok tampil 0 KK / 0 Jiwa di "Rekap Blok Rumah"). Sekarang TOTAL 50 KK
+  // disebar ke SEMUA blok (Blok A, Blok B, F1-F14, G1-G6) mengikuti pola
+  // sebaran yang sama seperti dummy "Informasi Warga" (INFORMASI_WARGA_DUMMY
+  // di bawah), supaya tiap kartu blok di "Rekap Blok Rumah" tampil data yang
+  // wajar (bukan mayoritas 0), sekaligus Rekap Usia Otomatis tiap blok jadi
+  // bervariasi (Balita/Anak-anak/Remaja/Dewasa/Lansia).
   // ==========================================
   const NAMA_BLOK_TAMBAHAN_FG = [
     ...Array.from({ length: 14 }, (_, i) => `Blok F${i + 1}`),
@@ -442,29 +494,59 @@ export default function IuranWargaRTApp() {
     'Budi Santoso', 'Dewi Kartika', 'Eko Prasetyo', 'Fitriani Handayani', 'Gunawan Wijaya', 'Hasan Basri',
     'Indah Permatasari', 'Joko Susilo', 'Kartini Wulandari', 'Lukman Hakim', 'Maya Sari', 'Nur Aini',
     'Oscar Pratama', 'Putri Ayu Lestari', 'Qori Fadillah', 'Rudi Hartono', 'Sri Wahyuni', 'Taufik Rahman',
-    'Umi Kalsum', 'Vina Melati',
+    'Umi Kalsum', 'Vina Melati', 'Wahyu Nugroho', 'Xena Anindya', 'Yusuf Mahendra', 'Zahra Amelia',
   ];
-  const membersTambahanBlokFG = NAMA_BLOK_TAMBAHAN_FG.map((namaBlok, idx) => {
-    const namaKK = NAMA_CONTOH_WARGA_FG[idx % NAMA_CONTOH_WARGA_FG.length];
+  // TARGET JUMLAH KK PER BLOK - dibuat total = 50 KK, tersebar ke seluruh
+  // 22 blok (Blok A, Blok B, F1-F14, G1-G6) dengan variasi 1-3 KK per blok
+  // supaya tampilannya wajar (tidak rata/kaku, tidak ada yang 0).
+  const TARGET_KK_PER_BLOK = {
+    'Blok A': 3, 'Blok B': 2,
+    'Blok F1': 2, 'Blok F2': 3, 'Blok F3': 2, 'Blok F4': 2, 'Blok F5': 3, 'Blok F6': 2, 'Blok F7': 2,
+    'Blok F8': 3, 'Blok F9': 2, 'Blok F10': 2, 'Blok F11': 3, 'Blok F12': 2, 'Blok F13': 2, 'Blok F14': 3,
+    'Blok G1': 2, 'Blok G2': 2, 'Blok G3': 2, 'Blok G4': 2, 'Blok G5': 2, 'Blok G6': 2,
+  };
+  // KK yang SUDAH ADA lewat data tetap (Hidayat & Ahmad Fauzi di Blok A,
+  // Siti Aminah di Blok B - dipakai untuk akun contoh login). Sisanya
+  // (TARGET - yang sudah ada) baru dibuatkan KK contoh tambahan di bawah,
+  // supaya total keseluruhan (data tetap + tambahan) genap 50 KK.
+  const KK_SUDAH_ADA_PER_BLOK = { 'Blok A': 2, 'Blok B': 1 };
+  // Susun daftar blok untuk tiap KK TAMBAHAN yang perlu dibuat (nama blok
+  // diulang sebanyak kekurangannya) - urutan ini juga dipakai sebagai idx
+  // global supaya nama warga contoh & tanggal lahir anggota keluarga tetap
+  // bervariasi antar KK.
+  const DAFTAR_BLOK_UNTUK_KK_TAMBAHAN = [];
+  Object.keys(TARGET_KK_PER_BLOK).forEach((namaBlok) => {
+    const sudahAda = KK_SUDAH_ADA_PER_BLOK[namaBlok] || 0;
+    const kurang = TARGET_KK_PER_BLOK[namaBlok] - sudahAda;
+    for (let n = 0; n < kurang; n++) DAFTAR_BLOK_UNTUK_KK_TAMBAHAN.push(namaBlok);
+  });
+  const membersTambahanBlokFG = DAFTAR_BLOK_UNTUK_KK_TAMBAHAN.map((namaBlok, idx) => {
+    const namaDasar = NAMA_CONTOH_WARGA_FG[idx % NAMA_CONTOH_WARGA_FG.length];
+    const kodeBlok = namaBlok.replace('Blok ', '');
+    const namaKK = `${namaDasar} (${kodeBlok})`;
     const jumlahAnak = idx % 3; // variasi 0-2 anak per KK contoh, supaya rekap usia bervariasi
     const anggotaKeluarga = [];
     if (idx % 2 === 0) {
-      anggotaKeluarga.push({ id: `AKFG-${idx}-p`, nama: `Pasangan dari ${namaKK}`, hubungan: 'Istri', jenisKelamin: 'Perempuan', tanggalLahir: '1988-05-10' });
+      anggotaKeluarga.push({ id: `AKFG-${idx}-p`, nama: `Pasangan dari ${namaDasar}`, hubungan: 'Istri', jenisKelamin: 'Perempuan', tanggalLahir: '1988-05-10' });
+    }
+    if (idx % 9 === 0) {
+      // sesekali tambahkan anggota lansia (60+) supaya kategori "Lansia" juga terisi di beberapa blok
+      anggotaKeluarga.push({ id: `AKFG-${idx}-l`, nama: `Orang Tua dari ${namaDasar}`, hubungan: 'Mertua', jenisKelamin: idx % 2 === 0 ? 'Laki-laki' : 'Perempuan', tanggalLahir: '1958-03-20' });
     }
     for (let a = 0; a < jumlahAnak; a++) {
       const tahunLahir = 2008 + ((idx + a) % 18); // sebar rentang usia: balita s/d remaja
-      anggotaKeluarga.push({ id: `AKFG-${idx}-a${a}`, nama: `Anak ke-${a + 1} ${namaKK}`, hubungan: `Anak ke-${a + 1}`, jenisKelamin: a % 2 === 0 ? 'Laki-laki' : 'Perempuan', tanggalLahir: `${tahunLahir}-0${(a % 9) + 1}-15` });
+      anggotaKeluarga.push({ id: `AKFG-${idx}-a${a}`, nama: `Anak ke-${a + 1} ${namaDasar}`, hubungan: `Anak ke-${a + 1}`, jenisKelamin: a % 2 === 0 ? 'Laki-laki' : 'Perempuan', tanggalLahir: `${tahunLahir}-0${(a % 9) + 1}-15` });
     }
     return {
       id: `TR-FG-${idx + 1}`,
       nama: namaKK,
       nomorRumah: `${namaBlok} No. ${(idx % 12) + 1}`,
-      email: `${namaKK.toLowerCase().replace(/\s+/g, '.')}@mail.com`,
+      email: `${namaDasar.toLowerCase().replace(/\s+/g, '.')}${idx}@mail.com`,
       wa: `0812${String(30000000 + idx * 1111).slice(-8)}`,
       alamat: `${namaBlok} No. ${(idx % 12) + 1}, Perum Bumi Indah Proklamasi, RT 40/RW 08`,
       target: 540000,
       bergabung: '01 Jul 2026',
-      username: `warga${namaBlok.replace(/\s+/g, '').toLowerCase()}`,
+      username: `warga${namaBlok.replace(/\s+/g, '').toLowerCase()}${idx}`,
       password: 'demo12345',
       statusAnggota: 'Aktif',
       kelompok: namaBlok,
@@ -486,7 +568,10 @@ export default function IuranWargaRTApp() {
   // Diambil 2 contoh (1 dari Blok F, 1 dari Blok G) supaya tombol "Simulasi
   // Akun Pengguna" di Web Utama juga bisa langsung memperlihatkan tampilan
   // Dashboard & Rekap Blok Rumah untuk warga di Blok F/G, bukan cuma Blok A/B.
-  const CONTOH_SIMULASI_TAMBAHAN_FG = [membersTambahanBlokFG[0], membersTambahanBlokFG[14]];
+  const CONTOH_SIMULASI_TAMBAHAN_FG = [
+    membersTambahanBlokFG.find(m => m.kelompok === 'Blok F1') || membersTambahanBlokFG[0],
+    membersTambahanBlokFG.find(m => m.kelompok === 'Blok G1') || membersTambahanBlokFG[membersTambahanBlokFG.length - 1],
+  ];
 
   // ==========================================
   // 2. DATABASE MASTER ANGGOTA
@@ -924,19 +1009,7 @@ export default function IuranWargaRTApp() {
       const dataTunggakan = semua.tunggakan || [];
 
       if (Array.isArray(dataAnggota) && dataAnggota.length) {
-        // PERBAIKAN: sebelumnya beberapa warga (yang datanya sempat bolak-balik
-        // lewat Google Sheets) menampilkan password kosong ("-") walau tombol
-        // "Lihat" sudah diklik. Penyebabnya, kolom "password" di Sheet kadang
-        // terbaca dengan variasi penulisan huruf besar/kecil (mis. "Password"),
-        // sehingga m.password (huruf kecil semua) jadi kosong walau nilainya
-        // sebenarnya ADA di baris tsb. Fallback di bawah ini mencoba semua
-        // kemungkinan nama kolom sebelum dianggap benar-benar tidak ada.
-        setMembers(dataAnggota.map(m => ({
-          ...m,
-          password: m.password || m.Password || m.PASSWORD || '',
-          target: Number(m.target) || 0,
-          anggotaKeluarga: parseAnggotaKeluarga(m.anggotaKeluarga)
-        })));
+        setMembers(dataAnggota.map(m => ({ ...m, target: Number(m.target) || 0, anggotaKeluarga: parseAnggotaKeluarga(m.anggotaKeluarga) })));
         setDataWargaAsliSudahMasuk(true);
       }
       if (Array.isArray(dataIuran)) {
@@ -996,7 +1069,7 @@ export default function IuranWargaRTApp() {
         }));
       }
       setSheetStatus('synced');
-      if (!sunyi) showToast('Proses Completed');
+      if (!sunyi) showToast('Seluruh data website berhasil dimuat dari Google Sheets.');
     } catch (err) {
       console.error(err);
       setSheetStatus('error');
@@ -1256,101 +1329,6 @@ export default function IuranWargaRTApp() {
     window.clearTimeout(showToast._t);
     showToast._t = window.setTimeout(() => setToast(null), 3200);
   };
-
-  // ==========================================
-  // POP UP JUMLAH PENGUNJUNG WEBSITE (WEB UTAMA)
-  // -----------------------------------------------------------
-  // Menghitung total pengunjung lalu menampilkannya sebagai pop up di
-  // halaman Beranda/Web Utama begitu halaman pertama kali dibuka, dengan
-  // animasi angka berjalan (count-up) menuju angka total terakhir.
-  //
-  // SUMBER ANGKA:
-  //  1) Kalau Google Apps Script sudah tersambung (cmsTeks.appsScriptUrl
-  //     terisi) DAN Code.gs milik panitia sudah punya action 'trackVisitor'
-  //     (menambah +1 lalu mengembalikan { total: <angka> }), angka yang
-  //     dipakai adalah angka GLOBAL asli dari Google Sheets (akurat untuk
-  //     SEMUA pengunjung, semua perangkat).
-  //  2) Kalau belum tersambung / Code.gs belum punya action tsb (fetch
-  //     gagal / hasilnya bukan angka), aplikasi otomatis fallback memakai
-  //     hitungan LOKAL per-browser (localStorage) supaya popup tetap
-  //     berfungsi walau belum ada backend - namun angka ini hanya
-  //     memantau kunjungan dari browser/perangkat itu sendiri, bukan
-  //     gabungan semua pengunjung. Untuk hitungan global sungguhan,
-  //     tambahkan action 'trackVisitor' di Code.gs panitia.
-  // Dipakai sessionStorage supaya 1 kunjungan (1 sesi tab) hanya dihitung
-  // SEKALI walau pengunjung pindah-pindah tab Web Utama/Dashboard di app ini.
-  // ==========================================
-  const [visitorTotal, setVisitorTotal] = useState(null); // angka final/target
-  const [visitorDisplay, setVisitorDisplay] = useState(0); // angka yang sedang dianimasikan
-  const [showVisitorPopup, setShowVisitorPopup] = useState(false);
-  const visitorPopupSudahTampilRef = useRef(false);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (visitorPopupSudahTampilRef.current) return; // hanya sekali per pemuatan app
-    visitorPopupSudahTampilRef.current = true;
-
-    const SESSION_KEY = 'iuran_rt_visitor_counted_session';
-    const LOCAL_KEY = 'iuran_rt_visitor_total_local';
-    const sudahDihitungSesiIni = window.sessionStorage.getItem(SESSION_KEY);
-
-    const hitungLokalFallback = () => {
-      let totalLokal = parseInt(window.localStorage.getItem(LOCAL_KEY) || '0', 10);
-      if (!totalLokal || isNaN(totalLokal)) {
-        // Angka awal biar tampilan tidak mulai dari 0/1 saat pertama kali dipakai.
-        totalLokal = 128;
-      }
-      if (!sudahDihitungSesiIni) {
-        totalLokal += 1;
-        window.localStorage.setItem(LOCAL_KEY, String(totalLokal));
-      }
-      return totalLokal;
-    };
-
-    const jalankanHitung = async () => {
-      let totalAkhir = null;
-      if (!sudahDihitungSesiIni && cmsTeks.appsScriptUrl) {
-        try {
-          const hasil = await sheetFetch(cmsTeks.appsScriptUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({ action: 'trackVisitor' }),
-          });
-          if (hasil && typeof hasil.total === 'number' && !isNaN(hasil.total)) {
-            totalAkhir = hasil.total;
-          }
-        } catch (e) {
-          totalAkhir = null; // biarkan fallback lokal di bawah yang menangani
-        }
-      }
-      if (totalAkhir === null) totalAkhir = hitungLokalFallback();
-      if (!sudahDihitungSesiIni) window.sessionStorage.setItem(SESSION_KEY, '1');
-
-      setVisitorTotal(totalAkhir);
-      setShowVisitorPopup(true);
-    };
-
-    jalankanHitung();
-  }, []);
-
-  // ANIMASI COUNT-UP: angka berjalan naik dari 0 menuju visitorTotal begitu
-  // popup tampil, memakai easing sederhana supaya laju angka melambat di akhir.
-  useEffect(() => {
-    if (visitorTotal === null || !showVisitorPopup) return;
-    const durasiMs = 1400;
-    const mulai = performance.now();
-    let frameId;
-    const animasikan = (sekarang) => {
-      const progres = Math.min(1, (sekarang - mulai) / durasiMs);
-      const eased = 1 - Math.pow(1 - progres, 3);
-      setVisitorDisplay(Math.round(eased * visitorTotal));
-      if (progres < 1) frameId = requestAnimationFrame(animasikan);
-    };
-    frameId = requestAnimationFrame(animasikan);
-    // Popup otomatis hilang sendiri setelah beberapa detik, tetap bisa ditutup manual.
-    const timeoutTutup = window.setTimeout(() => setShowVisitorPopup(false), 5500);
-    return () => { cancelAnimationFrame(frameId); window.clearTimeout(timeoutTutup); };
-  }, [visitorTotal, showVisitorPopup]);
 
   // ==========================================
   // STATE MODAL, EMAIL SIMULASI & PENDAFTARAN BARU
@@ -1988,7 +1966,6 @@ export default function IuranWargaRTApp() {
       tagline: cmsForm.tagline,
       pengumuman: cmsForm.pengumuman,
       infoKontak: cmsForm.infoKontak,
-      infoKontakPanitia: cmsForm.infoKontakPanitia,
       visi: cmsForm.visi,
       misi: cmsForm.misi,
       syaratList: cmsForm.syaratText.split('\n').map(s => s.trim()).filter(Boolean),
@@ -3560,39 +3537,6 @@ export default function IuranWargaRTApp() {
         </div>
       )}
 
-      {/* KARTU TOTAL PENGUNJUNG WEBSITE - tampil sekali di awal (Web Utama),
-          untuk SEMUA pengguna (warga maupun admin, siapapun yang membuka
-          website), dengan animasi angka berjalan (count-up) menuju angka
-          final. Angka diambil dari action 'trackVisitor' di Google Apps
-          Script (lihat muatSemuaDataDariSheet / jalankanHitung di atas) -
-          jadi totalnya global, bukan cuma hitungan 1 perangkat.
-          Tampilan dibuat lebih elegan/profesional (kartu gelap minimalis,
-          ikon tren bersih) - TANPA ikon mata 👀 seperti versi sebelumnya. */}
-      {showVisitorPopup && visitorTotal !== null && (
-        <div className="fixed bottom-5 left-5 right-5 sm:right-auto z-[110] flex justify-start pointer-events-none">
-          <div className="pointer-events-auto anim-pop bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 border border-white/10 shadow-2xl rounded-2xl px-5 py-4 flex items-center gap-3.5 max-w-sm w-full sm:w-auto">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-400/20 flex items-center justify-center shrink-0">
-              <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 text-emerald-400" xmlns="http://www.w3.org/2000/svg">
-                <path d="M3 17.5 9 11l4 4 8-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M15 6h6v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Total Pengunjung Website</p>
-              <p className="text-2xl font-black text-white tabular-nums leading-tight">{visitorDisplay.toLocaleString('id-ID')}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowVisitorPopup(false)}
-              className="shrink-0 w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 font-black text-xs flex items-center justify-center transition-colors"
-              aria-label="Tutup"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* SIMULATOR SWITCHER HEADER */}
       <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white px-3 sm:px-6 py-2.5 text-xs font-bold flex flex-wrap justify-between items-center gap-y-2 border-b border-emerald-900 shadow-md">
         <div className="flex items-center gap-2 min-w-0 overflow-hidden whitespace-nowrap">
@@ -3651,9 +3595,16 @@ export default function IuranWargaRTApp() {
                 <p className="text-[10px] text-emerald-700 font-bold uppercase tracking-widest truncate">{cmsTeks.subJudulBeranda}</p>
               </div>
             </div>
-            <a href={buatLinkWhatsapp(cmsTeks.infoKontak)} target="_blank" rel="noopener noreferrer" className="w-full sm:w-auto justify-center text-xs font-bold text-slate-500 hover:text-emerald-700 flex items-center gap-1.5 bg-slate-50 hover:bg-emerald-50 px-3 py-1.5 rounded-full border transition-colors duration-200">
-              <span className="text-emerald-600">●</span> Hubungi Kami: {cmsTeks.infoKontak}
-            </a>
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-center sm:justify-end">
+              {/* COUNTER PENGUNJUNG WEB - angka SAMA untuk semua orang & terus naik
+                  tiap kali ada yang membuka Web Utama (lihat useEffect totalPengunjung). */}
+              <span className="text-xs font-bold text-slate-500 flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-full border">
+                <span className="text-emerald-600">👁️</span> {totalPengunjung !== null ? totalPengunjung.toLocaleString('id-ID') : '...'} Pengunjung
+              </span>
+              <a href={buatLinkWhatsapp(cmsTeks.infoKontak)} target="_blank" rel="noopener noreferrer" className="justify-center text-xs font-bold text-slate-500 hover:text-emerald-700 flex items-center gap-1.5 bg-slate-50 hover:bg-emerald-50 px-3 py-1.5 rounded-full border transition-colors duration-200">
+                <span className="text-emerald-600">●</span> Hubungi Kami: {cmsTeks.infoKontak}
+              </a>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -3690,10 +3641,10 @@ export default function IuranWargaRTApp() {
                   <p className="text-[10px] text-slate-400 mt-2">Pastikan hanya transfer ke rekening resmi di atas. Nomor ini diatur langsung oleh panitia lewat Admin Panel.</p>
                 </div>
                 <div className="bg-white p-5 rounded-2xl border">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Hubungi Pengurus</h4>
-                  <p className="text-slate-700 font-bold">{cmsTeks.infoKontakPanitia || cmsTeks.infoKontak}</p>
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Hubungi Panitia</h4>
+                  <p className="text-slate-700 font-bold">{cmsTeks.infoKontak}</p>
                   <a
-                    href={buatLinkWhatsapp(cmsTeks.infoKontakPanitia || cmsTeks.infoKontak)}
+                    href={buatLinkWhatsapp(cmsTeks.infoKontak)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="mt-2 inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] px-3 py-1.5 rounded-full transition-colors duration-200"
@@ -3834,8 +3785,16 @@ export default function IuranWargaRTApp() {
                       <p className="text-amber-400 font-black text-2xl tracking-widest font-mono">{jamSekarang}</p>
                       <p className="text-slate-300 text-[9px] font-bold mt-0.5 uppercase tracking-wide">{tanggalSekarang} • WIB</p>
                     </div>
-                    <div className="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl py-2 px-3 text-center">
-                      <p className="text-emerald-800 text-[10px] font-black">📣 {getPengumumanBerjalan()}</p>
+                    {/* RUNNING TEXT (MARQUEE) - menggantikan teks statis, berjalan terus
+                        menerus tanpa henti supaya kotak info selalu "hidup". */}
+                    <div className="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl py-2 px-3 flex items-center gap-2">
+                      <span className="text-base shrink-0">🔔</span>
+                      <div className="marquee-wrap flex-1 min-w-0">
+                        <div className="marquee-track text-emerald-800 text-[10px] font-black">
+                          <span>Digitalisasi untuk kemudahan dan kecepatan informasi warga</span>
+                          <span>Digitalisasi untuk kemudahan dan kecepatan informasi warga</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div className="bg-slate-50 border rounded-2xl p-4">
@@ -5718,7 +5677,10 @@ export default function IuranWargaRTApp() {
                             </select>
                           </div>
                           <div className="sm:col-span-2">
-                            <label className="block mb-1 text-slate-600 text-[11px]">Bukti Foto Struk/Nota</label>
+                            <label className="block mb-1 text-slate-600 text-[11px]">Bukti Foto Struk/Nota <span className="text-slate-400 font-normal normal-case">(Opsional - transaksi tetap bisa disimpan tanpa foto)</span></label>
+                            {/* SENGAJA TIDAK diberi atribut `required` - bukti foto boleh dilewati.
+                                handleTambahRealisasiBelanja hanya mewajibkan keterangan & nominal,
+                                jadi transaksi realisasi belanja tetap bisa disimpan tanpa foto. */}
                             <input type="file" accept="image/*" onChange={handleFotoRealisasiChange} className="w-full border p-2 rounded-xl bg-white text-[11px]" />
                             {formRealisasiBaru.buktiUrl && (
                               <div className="mt-2 flex items-center gap-2">
@@ -5992,21 +5954,6 @@ export default function IuranWargaRTApp() {
                                   <span className="text-slate-400 font-normal mt-0.5">
                                     Username: <span className="font-mono text-slate-700">{m.username}</span>
                                   </span>
-                                  <span className="text-slate-400 font-normal flex items-center gap-1.5 mt-0.5">
-                                    Password:{' '}
-                                    {visiblePasswordIds.includes(m.id) ? (
-                                      m.password ? (
-                                        <span className="font-mono text-slate-700">{m.password}</span>
-                                      ) : (
-                                        <span className="italic text-rose-500">belum ada, klik Reset Password</span>
-                                      )
-                                    ) : (
-                                      <span className="font-mono text-slate-700">••••••••</span>
-                                    )}
-                                    <button type="button" onClick={() => togglePasswordVisibility(m.id)} className="text-emerald-700 font-bold text-[10px] underline underline-offset-2">
-                                      {visiblePasswordIds.includes(m.id) ? 'Sembunyikan' : 'Lihat'}
-                                    </button>
-                                  </span>
                                 </div>
                               </div>
                               <div className="flex items-center gap-3">
@@ -6148,8 +6095,7 @@ export default function IuranWargaRTApp() {
                       <div><label className="block text-slate-600 mb-1">Nama RT (KOP)</label><input type="text" value={cmsForm.namaRT} onChange={(e) => setCmsForm({...cmsForm, namaRT: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">Alamat RT (KOP)</label><input type="text" value={cmsForm.alamatRT} onChange={(e) => setCmsForm({...cmsForm, alamatRT: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">No. Rekening (tampil di Web Utama)</label><input type="text" value={cmsForm.noRekening} onChange={(e) => setCmsForm({...cmsForm, noRekening: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
-                      <div><label className="block text-slate-600 mb-1">No. WhatsApp Kontak - "Hubungi Kami" di Header (tombol Chat WA otomatis mengikuti nomor ini)</label><input type="text" placeholder="08xxxxxxxxxx" value={cmsForm.infoKontak} onChange={(e) => setCmsForm({...cmsForm, infoKontak: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
-                      <div><label className="block text-slate-600 mb-1">No. WhatsApp Pengurus - "Hubungi Pengurus" (boleh beda dari nomor di atas, kosongkan untuk ikut nomor "Hubungi Kami")</label><input type="text" placeholder="08xxxxxxxxxx" value={cmsForm.infoKontakPanitia} onChange={(e) => setCmsForm({...cmsForm, infoKontakPanitia: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
+                      <div><label className="block text-slate-600 mb-1">No. WhatsApp Kontak (tombol Chat WA otomatis mengikuti nomor ini)</label><input type="text" placeholder="08xxxxxxxxxx" value={cmsForm.infoKontak} onChange={(e) => setCmsForm({...cmsForm, infoKontak: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">Judul Banner Utama</label><input type="text" value={cmsForm.judulBeranda} onChange={(e) => setCmsForm({...cmsForm, judulBeranda: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">Nama Program / Subjudul</label><input type="text" value={cmsForm.subJudulBeranda} onChange={(e) => setCmsForm({...cmsForm, subJudulBeranda: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                       <div><label className="block text-slate-600 mb-1">Papan Pengumuman</label><textarea rows={2} value={cmsForm.pengumuman} onChange={(e) => setCmsForm({...cmsForm, pengumuman: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
