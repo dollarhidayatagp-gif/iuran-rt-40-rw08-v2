@@ -466,25 +466,17 @@ export default function IuranWargaRTApp() {
   });
 
   // ==========================================
-  // DATA SIMULASI TAMBAHAN: BLOK A, B, F1-F14 & G1-G6 (CONTOH/DUMMY) — TOTAL 50 KK
+  // DATA DUMMY KHUSUS SIMULASI "REKAP BLOK RUMAH" (TOTAL 50 KK)
   // -----------------------------------------------------------
-  // Ditambahkan sebagai gambaran bagaimana "Rekap Blok Rumah" akan tampil
-  // otomatis setelah admin membuat banyak blok & mengisi banyak data warga
-  // (baik untuk role Admin yang melihat SELURUH blok, maupun role User
-  // yang hanya melihat blok tempat tinggalnya sendiri). Data ini HANYA
-  // dipakai saat aplikasi belum tersambung ke Google Sheets (mode demo) -
-  // begitu appsScriptUrl diisi & Sheets terhubung, data ASLI dari Sheets
-  // otomatis MENGGANTIKAN seluruh data contoh ini (lihat useEffect fetch
-  // di atas: setMembers/setKelompokList hanya dipanggil kalau data Sheets
-  // tidak kosong).
-  //
-  // PERUBAHAN: sebelumnya tiap blok F/G hanya diisi 1 KK contoh (banyak
-  // blok tampil 0 KK / 0 Jiwa di "Rekap Blok Rumah"). Sekarang TOTAL 50 KK
-  // disebar ke SEMUA blok (Blok A, Blok B, F1-F14, G1-G6) mengikuti pola
-  // sebaran yang sama seperti dummy "Informasi Warga" (INFORMASI_WARGA_DUMMY
-  // di bawah), supaya tiap kartu blok di "Rekap Blok Rumah" tampil data yang
-  // wajar (bukan mayoritas 0), sekaligus Rekap Usia Otomatis tiap blok jadi
-  // bervariasi (Balita/Anak-anak/Remaja/Dewasa/Lansia).
+  // PENTING - PERUBAHAN SESUAI PERMINTAAN: dataset 50 KK ini SEKARANG HANYA
+  // dipakai saat isSimulatedSession === true (mode "🧪 Simulasi Akun
+  // Pengguna" di Web Utama). TIDAK LAGI digabung ke `members`/database asli,
+  // supaya akun user/admin yang BENAR-BENAR login tetap murni memakai data
+  // ASLI dari Google Sheets (meski baru terisi sedikit atau masih kosong),
+  // persis seperti pola yang sudah dipakai di menu "Informasi Warga",
+  // "Anggota Keluarga", & "Laporan Belanja Kas RT" (lihat isSimulatedSession
+  // di menu-menu tsb). Lihat pemakaiannya di bagian "REKAP BLOK RUMAH" di
+  // bawah: anggotaSemuaUntukTampil = isSimulatedSession ? MEMBERS_DUMMY_REKAP_BLOK : members.
   // ==========================================
   const NAMA_BLOK_TAMBAHAN_FG = [
     ...Array.from({ length: 14 }, (_, i) => `Blok F${i + 1}`),
@@ -496,57 +488,51 @@ export default function IuranWargaRTApp() {
     'Oscar Pratama', 'Putri Ayu Lestari', 'Qori Fadillah', 'Rudi Hartono', 'Sri Wahyuni', 'Taufik Rahman',
     'Umi Kalsum', 'Vina Melati', 'Wahyu Nugroho', 'Xena Anindya', 'Yusuf Mahendra', 'Zahra Amelia',
   ];
-  // TARGET JUMLAH KK PER BLOK - dibuat total = 50 KK, tersebar ke seluruh
-  // 22 blok (Blok A, Blok B, F1-F14, G1-G6) dengan variasi 1-3 KK per blok
-  // supaya tampilannya wajar (tidak rata/kaku, tidak ada yang 0).
-  const TARGET_KK_PER_BLOK = {
+  // TARGET JUMLAH KK PER BLOK (KHUSUS DATA DUMMY SIMULASI) - total = 50 KK,
+  // tersebar ke seluruh 22 blok (Blok A, Blok B, F1-F14, G1-G6) dengan
+  // variasi 1-3 KK per blok supaya tampilannya wajar (tidak ada yang 0).
+  const TARGET_KK_PER_BLOK_SIMULASI = {
     'Blok A': 3, 'Blok B': 2,
     'Blok F1': 2, 'Blok F2': 3, 'Blok F3': 2, 'Blok F4': 2, 'Blok F5': 3, 'Blok F6': 2, 'Blok F7': 2,
     'Blok F8': 3, 'Blok F9': 2, 'Blok F10': 2, 'Blok F11': 3, 'Blok F12': 2, 'Blok F13': 2, 'Blok F14': 3,
     'Blok G1': 2, 'Blok G2': 2, 'Blok G3': 2, 'Blok G4': 2, 'Blok G5': 2, 'Blok G6': 2,
   };
-  // KK yang SUDAH ADA lewat data tetap (Hidayat & Ahmad Fauzi di Blok A,
-  // Siti Aminah di Blok B - dipakai untuk akun contoh login). Sisanya
-  // (TARGET - yang sudah ada) baru dibuatkan KK contoh tambahan di bawah,
-  // supaya total keseluruhan (data tetap + tambahan) genap 50 KK.
-  const KK_SUDAH_ADA_PER_BLOK = { 'Blok A': 2, 'Blok B': 1 };
-  // Susun daftar blok untuk tiap KK TAMBAHAN yang perlu dibuat (nama blok
-  // diulang sebanyak kekurangannya) - urutan ini juga dipakai sebagai idx
+  // Susun daftar blok untuk tiap KK DUMMY yang perlu dibuat (nama blok
+  // diulang sebanyak target KK-nya) - urutan ini juga dipakai sebagai idx
   // global supaya nama warga contoh & tanggal lahir anggota keluarga tetap
   // bervariasi antar KK.
-  const DAFTAR_BLOK_UNTUK_KK_TAMBAHAN = [];
-  Object.keys(TARGET_KK_PER_BLOK).forEach((namaBlok) => {
-    const sudahAda = KK_SUDAH_ADA_PER_BLOK[namaBlok] || 0;
-    const kurang = TARGET_KK_PER_BLOK[namaBlok] - sudahAda;
-    for (let n = 0; n < kurang; n++) DAFTAR_BLOK_UNTUK_KK_TAMBAHAN.push(namaBlok);
+  const DAFTAR_BLOK_UNTUK_KK_DUMMY = [];
+  Object.keys(TARGET_KK_PER_BLOK_SIMULASI).forEach((namaBlok) => {
+    for (let n = 0; n < TARGET_KK_PER_BLOK_SIMULASI[namaBlok]; n++) DAFTAR_BLOK_UNTUK_KK_DUMMY.push(namaBlok);
   });
-  const membersTambahanBlokFG = DAFTAR_BLOK_UNTUK_KK_TAMBAHAN.map((namaBlok, idx) => {
+  // DATASET UTAMA: 50 KK dummy, HANYA dipakai saat isSimulatedSession true.
+  const MEMBERS_DUMMY_REKAP_BLOK = DAFTAR_BLOK_UNTUK_KK_DUMMY.map((namaBlok, idx) => {
     const namaDasar = NAMA_CONTOH_WARGA_FG[idx % NAMA_CONTOH_WARGA_FG.length];
     const kodeBlok = namaBlok.replace('Blok ', '');
-    const namaKK = `${namaDasar} (${kodeBlok})`;
+    const namaKK = `${namaDasar} (${kodeBlok} - Simulasi)`;
     const jumlahAnak = idx % 3; // variasi 0-2 anak per KK contoh, supaya rekap usia bervariasi
     const anggotaKeluarga = [];
     if (idx % 2 === 0) {
-      anggotaKeluarga.push({ id: `AKFG-${idx}-p`, nama: `Pasangan dari ${namaDasar}`, hubungan: 'Istri', jenisKelamin: 'Perempuan', tanggalLahir: '1988-05-10' });
+      anggotaKeluarga.push({ id: `SIM-AK-${idx}-p`, nama: `Pasangan dari ${namaDasar}`, hubungan: 'Istri', jenisKelamin: 'Perempuan', tanggalLahir: '1988-05-10' });
     }
     if (idx % 9 === 0) {
       // sesekali tambahkan anggota lansia (60+) supaya kategori "Lansia" juga terisi di beberapa blok
-      anggotaKeluarga.push({ id: `AKFG-${idx}-l`, nama: `Orang Tua dari ${namaDasar}`, hubungan: 'Mertua', jenisKelamin: idx % 2 === 0 ? 'Laki-laki' : 'Perempuan', tanggalLahir: '1958-03-20' });
+      anggotaKeluarga.push({ id: `SIM-AK-${idx}-l`, nama: `Orang Tua dari ${namaDasar}`, hubungan: 'Mertua', jenisKelamin: idx % 2 === 0 ? 'Laki-laki' : 'Perempuan', tanggalLahir: '1958-03-20' });
     }
     for (let a = 0; a < jumlahAnak; a++) {
       const tahunLahir = 2008 + ((idx + a) % 18); // sebar rentang usia: balita s/d remaja
-      anggotaKeluarga.push({ id: `AKFG-${idx}-a${a}`, nama: `Anak ke-${a + 1} ${namaDasar}`, hubungan: `Anak ke-${a + 1}`, jenisKelamin: a % 2 === 0 ? 'Laki-laki' : 'Perempuan', tanggalLahir: `${tahunLahir}-0${(a % 9) + 1}-15` });
+      anggotaKeluarga.push({ id: `SIM-AK-${idx}-a${a}`, nama: `Anak ke-${a + 1} ${namaDasar}`, hubungan: `Anak ke-${a + 1}`, jenisKelamin: a % 2 === 0 ? 'Laki-laki' : 'Perempuan', tanggalLahir: `${tahunLahir}-0${(a % 9) + 1}-15` });
     }
     return {
-      id: `TR-FG-${idx + 1}`,
+      id: `SIM-TR-${idx + 1}`,
       nama: namaKK,
       nomorRumah: `${namaBlok} No. ${(idx % 12) + 1}`,
-      email: `${namaDasar.toLowerCase().replace(/\s+/g, '.')}${idx}@mail.com`,
+      email: `${namaDasar.toLowerCase().replace(/\s+/g, '.')}${idx}@simulasi.mail.com`,
       wa: `0812${String(30000000 + idx * 1111).slice(-8)}`,
       alamat: `${namaBlok} No. ${(idx % 12) + 1}, Perum Bumi Indah Proklamasi, RT 40/RW 08`,
       target: 540000,
       bergabung: '01 Jul 2026',
-      username: `warga${namaBlok.replace(/\s+/g, '').toLowerCase()}${idx}`,
+      username: `simulasi${namaBlok.replace(/\s+/g, '').toLowerCase()}${idx}`,
       password: 'demo12345',
       statusAnggota: 'Aktif',
       kelompok: namaBlok,
@@ -556,6 +542,10 @@ export default function IuranWargaRTApp() {
       anggotaKeluarga,
     };
   });
+  // DEFINISI BLOK (nama, jenis, kapasitas) F1-F14 & G1-G6 - ini TETAP masuk
+  // ke `kelompokList` ASLI (bukan hanya simulasi), supaya blok-nya sendiri
+  // sudah terdaftar & siap dipakai admin/warga real, hanya JUMLAH KK di
+  // dalamnya yang masih 0 sampai ada pendaftar/​sinkron data asli.
   const kelompokTambahanBlokFG = NAMA_BLOK_TAMBAHAN_FG.map((namaBlok, idx) => ({
     id: `GRP-FG-${idx + 1}`,
     nama: namaBlok,
@@ -565,16 +555,23 @@ export default function IuranWargaRTApp() {
     status: 'Progress',
     tglDibuat: '15 Jul 2026',
   }));
-  // Diambil 2 contoh (1 dari Blok F, 1 dari Blok G) supaya tombol "Simulasi
-  // Akun Pengguna" di Web Utama juga bisa langsung memperlihatkan tampilan
-  // Dashboard & Rekap Blok Rumah untuk warga di Blok F/G, bukan cuma Blok A/B.
+  // Diambil 2 contoh (1 dari Blok F, 1 dari Blok G) dari dataset DUMMY di
+  // atas supaya tombol "Simulasi Akun Pengguna" di Web Utama juga bisa
+  // langsung memperlihatkan tampilan Dashboard & Rekap Blok Rumah untuk
+  // warga di Blok F/G, bukan cuma Blok A/B - murni untuk pratinjau, TIDAK
+  // terhubung ke database `members` asli.
   const CONTOH_SIMULASI_TAMBAHAN_FG = [
-    membersTambahanBlokFG.find(m => m.kelompok === 'Blok F1') || membersTambahanBlokFG[0],
-    membersTambahanBlokFG.find(m => m.kelompok === 'Blok G1') || membersTambahanBlokFG[membersTambahanBlokFG.length - 1],
+    MEMBERS_DUMMY_REKAP_BLOK.find(m => m.kelompok === 'Blok F1'),
+    MEMBERS_DUMMY_REKAP_BLOK.find(m => m.kelompok === 'Blok G1'),
   ];
 
   // ==========================================
   // 2. DATABASE MASTER ANGGOTA
+  // -----------------------------------------------------------
+  // HANYA berisi akun contoh untuk TESTING LOGIN REAL (Hidayat/Ahmad/Siti).
+  // SENGAJA TIDAK digabung dengan data dummy 50 KK di atas, supaya akun
+  // user/admin yang benar-benar login tetap memakai data ASLI (dari Google
+  // Sheets begitu tersambung), bukan data contoh/simulasi.
   // ==========================================
   const [members, setMembers] = useState([
     { id: 'TR-01', nama: 'Hidayat', nomorRumah: 'Blok A No. 5', email: 'hidayat@mail.com', wa: '081234567890', alamat: 'Blok A No. 5, Perum Bumi Indah Proklamasi, RT 40/RW 08', target: 540000, bergabung: '10 Jan 2026', username: 'hidayat123', password: 'password123', statusAnggota: 'Aktif', kelompok: 'Blok A', akses: 'admin', statusRumah: 'Milik Sendiri', pengurus: false, anggotaKeluarga: [
@@ -585,7 +582,6 @@ export default function IuranWargaRTApp() {
       { id: 'AK-03', nama: 'Dewi Lestari', hubungan: 'Istri', jenisKelamin: 'Perempuan', tanggalLahir: '1993-11-02' },
     ] },
     { id: 'TR-03', nama: 'Siti Aminah', nomorRumah: 'Blok B No. 3', email: 'siti@mail.com', wa: '085799998888', alamat: 'Blok B No. 3, Perum Bumi Indah Proklamasi, RT 40/RW 08', target: 540000, bergabung: '15 Jan 2026', username: 'sitiaminah', password: 'password789', statusAnggota: 'Pasif', kelompok: 'Blok B', akses: 'user', statusRumah: 'Milik Sendiri', pengurus: false, anggotaKeluarga: [] },
-    ...membersTambahanBlokFG, // contoh/dummy warga Blok F1-F14 & G1-G6, otomatis diganti data asli begitu tersambung Google Sheets
   ]);
 
   // Daftar TETAP/STATIS untuk tombol "Simulasi Akun Pengguna" di landing page.
@@ -5136,12 +5132,18 @@ export default function IuranWargaRTApp() {
             )}
 
             {/* REKAP BLOK RUMAH */}
-            {activeMenu === 'laporan-sapi' && (
+            {activeMenu === 'laporan-sapi' && (() => {
+              // KHUSUS SIMULASI (tombol "🧪 Simulasi Akun Pengguna" dari Web Utama):
+              // pakai dataset dummy 50 KK (MEMBERS_DUMMY_REKAP_BLOK). Akun yang
+              // BENAR-BENAR login (isSimulatedSession === false) tetap memakai
+              // `members` ASLI dari Google Sheets, walau datanya masih sedikit/kosong.
+              const anggotaSemuaUntukTampil = isSimulatedSession ? MEMBERS_DUMMY_REKAP_BLOK : members;
+              return (
               <div className="space-y-6">
                 <div className="bg-white p-6 rounded-2xl border shadow-xs space-y-6">
                   <div>
                     <h3 className="text-sm font-black text-slate-900">Daftar Blok Rumah RT</h3>
-                    <p className="text-xs text-slate-400">Menampilkan seluruh database kelompok/blok beserta status, sama seperti tampilan pengurus.</p>
+                    <p className="text-xs text-slate-400">Menampilkan seluruh database kelompok/blok beserta status, sama seperti tampilan pengurus.{isSimulatedSession ? ' (Data contoh/simulasi - 50 KK, bukan data warga asli.)' : ''}</p>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-xs font-semibold">
@@ -5149,7 +5151,7 @@ export default function IuranWargaRTApp() {
                       // Rekap Blok Rumah sekarang SAMA untuk Admin maupun akun user
                       // (warga) - menampilkan seluruh KK di tiap blok, bukan hanya
                       // keluarga sendiri, supaya warga bisa lihat data seluruh RT.
-                      const anggotaKelompok = members.filter(m => m.kelompok === k.nama);
+                      const anggotaKelompok = anggotaSemuaUntukTampil.filter(m => m.kelompok === k.nama);
                       const rekapUsia = getRekapKategoriUsia(anggotaKelompok);
                       const totalJiwa = anggotaKelompok.length + anggotaKelompok.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
                       return (
@@ -5279,7 +5281,8 @@ export default function IuranWargaRTApp() {
                   );
                 })()}
               </div>
-            )}
+              );
+            })()}
 
             {/* ANGGOTA KELUARGA (USER) */}
             {activeMenu === 'anggota-keluarga' && role === 'user' && (() => {
