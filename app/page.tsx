@@ -152,8 +152,11 @@ function useTrenPengunjung(totalPengunjung) {
       let riwayat = {};
       try { riwayat = JSON.parse(localStorage.getItem(KUNCI) || '{}') || {}; } catch (e) { riwayat = {}; }
 
-      // Simpan baseline hari ini hanya sekali (kunjungan pertama hari ini di perangkat ini)
-      if (riwayat[todayKey] === undefined) riwayat[todayKey] = totalPengunjung;
+      // Simpan baseline hari ini hanya sekali (kunjungan pertama hari ini di perangkat ini).
+      // PENTING: baseline harus nilai SEBELUM kunjungan saat ini (totalPengunjung - 1),
+      // bukan totalPengunjung itu sendiri - kalau tidak, kunjungan yang sedang berjalan ini
+      // ikut "termakan" ke baseline dan Hari Ini/Minggu Ini selalu tampil 0.
+      if (riwayat[todayKey] === undefined) riwayat[todayKey] = Math.max(0, totalPengunjung - 1);
 
       // Bersihkan riwayat lama supaya localStorage tidak membengkak
       const semuaTanggal = Object.keys(riwayat).sort();
@@ -380,6 +383,19 @@ export default function IuranWargaRTApp() {
   // Tren kunjungan (Hari Ini / Kemarin / Minggu Ini / Minggu Lalu + data sparkline)
   // dihitung otomatis dari totalPengunjung di atas.
   const trenPengunjung = useTrenPengunjung(totalPengunjung);
+
+  // ==========================================
+  // AUTO-HIDE KARTU "JUMLAH PENGUNJUNG" - kartu tren pengunjung otomatis
+  // memudar & hilang sendiri ±12 detik setelah halaman dibuka, supaya tidak
+  // memenuhi header terus-menerus (cukup dilihat sekilas di awal).
+  // ==========================================
+  const [pudarkanKartuPengunjung, setPudarkanKartuPengunjung] = useState(false);
+  const [tampilkanKartuPengunjung, setTampilkanKartuPengunjung] = useState(true);
+  useEffect(() => {
+    const timerPudar = setTimeout(() => setPudarkanKartuPengunjung(true), 11500);
+    const timerHilang = setTimeout(() => setTampilkanKartuPengunjung(false), 12000);
+    return () => { clearTimeout(timerPudar); clearTimeout(timerHilang); };
+  }, []);
 
   // ==========================================
   // NOTIFIKASI DALAM AKUN (BADGE "BELUM DIBACA") - USER & ADMIN
@@ -3781,32 +3797,38 @@ export default function IuranWargaRTApp() {
               {/* KARTU TREN PENGUNJUNG WEB - angka total SAMA untuk semua orang &
                   terus naik tiap kali ada yang membuka Web Utama (lihat useEffect
                   totalPengunjung), dilengkapi animasi hitung naik & grafik mini tren
-                  (lihat useTrenPengunjung). */}
-              <div className="flex items-center gap-3 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-slate-700/60 rounded-2xl px-3.5 py-2 shadow-md text-blue-300">
-                <SparklineTren data={trenPengunjung.spark} className="w-12 h-8 shrink-0" />
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <div className="pr-2.5 border-r border-slate-700">
-                    <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide leading-none">Total</p>
-                    <AngkaBerjalan value={totalPengunjung !== null ? totalPengunjung : 0} className="text-xs font-black text-white leading-tight" />
-                  </div>
-                  <div>
-                    <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide leading-none">Hari Ini</p>
-                    <p className="text-xs font-black text-white leading-tight">{trenPengunjung.hariIni.toLocaleString('id-ID')}</p>
-                  </div>
-                  <div>
-                    <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide leading-none">Kemarin</p>
-                    <p className="text-xs font-black text-white leading-tight">{trenPengunjung.kemarin.toLocaleString('id-ID')}</p>
-                  </div>
-                  <div>
-                    <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide leading-none">Mgg Ini</p>
-                    <p className="text-xs font-black text-white leading-tight">{trenPengunjung.mingguIni.toLocaleString('id-ID')}</p>
-                  </div>
-                  <div>
-                    <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide leading-none">Mgg Lalu</p>
-                    <p className="text-xs font-black text-white leading-tight">{trenPengunjung.mingguLalu.toLocaleString('id-ID')}</p>
+                  (lihat useTrenPengunjung). Otomatis memudar & hilang sendiri
+                  ±12 detik setelah halaman dibuka (lihat state tampilkanKartuPengunjung). */}
+              {tampilkanKartuPengunjung && (
+                <div className={`transition-opacity duration-700 ease-out ${pudarkanKartuPengunjung ? 'opacity-0' : 'opacity-100'}`}>
+                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide mb-1 text-center sm:text-left">Jumlah Pengunjung</p>
+                  <div className="flex items-center gap-3 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-slate-700/60 rounded-2xl px-3.5 py-2 shadow-md text-blue-300">
+                    <SparklineTren data={trenPengunjung.spark} className="w-12 h-8 shrink-0" />
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <div className="pr-2.5 border-r border-slate-700">
+                        <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide leading-none">Total</p>
+                        <AngkaBerjalan value={totalPengunjung !== null ? totalPengunjung : 0} className="text-xs font-black text-white leading-tight" />
+                      </div>
+                      <div>
+                        <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide leading-none">Hari Ini</p>
+                        <p className="text-xs font-black text-white leading-tight">{trenPengunjung.hariIni.toLocaleString('id-ID')}</p>
+                      </div>
+                      <div>
+                        <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide leading-none">Kemarin</p>
+                        <p className="text-xs font-black text-white leading-tight">{trenPengunjung.kemarin.toLocaleString('id-ID')}</p>
+                      </div>
+                      <div>
+                        <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide leading-none">Mgg Ini</p>
+                        <p className="text-xs font-black text-white leading-tight">{trenPengunjung.mingguIni.toLocaleString('id-ID')}</p>
+                      </div>
+                      <div>
+                        <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide leading-none">Mgg Lalu</p>
+                        <p className="text-xs font-black text-white leading-tight">{trenPengunjung.mingguLalu.toLocaleString('id-ID')}</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
               <a href={buatLinkWhatsapp(cmsTeks.infoKontak)} target="_blank" rel="noopener noreferrer" className="justify-center text-xs font-bold text-slate-500 hover:text-emerald-700 flex items-center gap-1.5 bg-slate-50 hover:bg-emerald-50 px-3 py-1.5 rounded-full border transition-colors duration-200">
                 <span className="text-emerald-600">●</span> Hubungi Kami: {cmsTeks.infoKontak}
               </a>
