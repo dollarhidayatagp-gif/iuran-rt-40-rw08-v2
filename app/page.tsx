@@ -319,12 +319,14 @@ export default function IuranWargaRTApp() {
   // berjalan:
   //   1) Kalau dipratinjau di Claude.ai -> tetap pakai window.storage.
   //   2) Kalau di website ASLI Anda (produksi) -> pakai layanan counter
-  //      publik gratis "CountAPI" (https://countapi.xyz) lewat fetch biasa.
-  //      Ini pihak ketiga gratis di luar Anthropic, dipakai luas untuk
-  //      counter sederhana seperti ini & TIDAK perlu server/Apps Script
-  //      tambahan sama sekali.
-  //   3) Kalau dua-duanya gagal (mis. sedang offline) -> fallback angka
-  //      lokal saja supaya tampilan tetap ada isinya (walau tidak sinkron).
+  //      publik gratis "CounterAPI.dev" (https://counterapi.dev) lewat fetch
+  //      biasa. Ini pihak ketiga gratis di luar Anthropic, TIDAK perlu
+  //      server/Apps Script tambahan sama sekali, dan TIDAK perlu API key
+  //      untuk versi v1 yang dipakai di sini.
+  //   3) Kalau dua-duanya gagal (mis. sedang offline) -> fallback angka yang
+  //      tersimpan di localStorage perangkat ini saja (supaya tetap naik
+  //      tiap kunjungan baru di perangkat yang sama, walau tidak tersinkron
+  //      ke pengunjung lain sampai koneksi normal kembali).
   // Contoh: User A buka -> lihat 131, User B buka -> otomatis 132, dst.
   // ==========================================
   const [totalPengunjung, setTotalPengunjung] = useState(null);
@@ -356,25 +358,44 @@ export default function IuranWargaRTApp() {
         // lanjut ke Lapis 2 di bawah
       }
 
-      // LAPIS 2: DI WEBSITE PRODUKSI SUNGGUHAN - pakai CountAPI (gratis,
-      // publik, tanpa perlu server sendiri) supaya angka SAMA & terus naik
-      // untuk SEMUA pengunjung sungguhan, tanpa mengubah Apps Script.
+      // LAPIS 2: DI WEBSITE PRODUKSI SUNGGUHAN - pakai CounterAPI.dev (gratis,
+      // publik, tanpa perlu server sendiri, tanpa perlu API key untuk versi v1)
+      // supaya angka SAMA & terus naik untuk SEMUA pengunjung sungguhan, tanpa
+      // mengubah Apps Script. CATATAN: sebelumnya di sini memakai countapi.xyz,
+      // tapi layanan itu SUDAH TUTUP/TIDAK AKTIF LAGI, makanya angka terlihat
+      // tidak jalan - sekarang diganti ke CounterAPI.dev yang masih aktif.
       try {
         const namespace = 'rt40rw08-iuran-warga-perum-bumi-indah-proklamasi';
-        const resp = await fetch(`https://api.countapi.xyz/hit/${namespace}/${KUNCI_PENGUNJUNG}`);
+        const resp = await fetch(`https://api.counterapi.dev/v1/${namespace}/${KUNCI_PENGUNJUNG}/up`);
         const data = await resp.json();
         if (data && typeof data.value === 'number') {
           if (!sudahDilepas) setTotalPengunjung(data.value + ANGKA_AWAL);
           return;
         }
-        throw new Error('Respons CountAPI tidak valid');
-      } catch (errCountApi) {
+        throw new Error('Respons CounterAPI.dev tidak valid');
+      } catch (errCounterApi) {
         // lanjut ke Lapis 3 (fallback lokal) di bawah
       }
 
-      // LAPIS 3: FALLBACK TERAKHIR (mis. sedang offline) - angka lokal saja,
-      // supaya kotak counter tetap tampil ada isinya walau tidak tersinkron.
-      if (!sudahDilepas) setTotalPengunjung((prev) => (prev || ANGKA_AWAL) + 1);
+      // LAPIS 3: FALLBACK TERAKHIR (mis. sedang offline / CounterAPI.dev juga
+      // bermasalah) - angka disimpan di localStorage PERANGKAT INI supaya tidak
+      // reset tiap kali halaman dimuat ulang (walau begitu, angka ini TIDAK
+      // tersinkron dengan pengunjung dari perangkat lain sampai koneksi ke
+      // CounterAPI.dev normal kembali).
+      try {
+        const KUNCI_FALLBACK_LOKAL = 'fallback-total-pengunjung-lokal';
+        let angkaLokal = ANGKA_AWAL;
+        const tersimpanLokal = localStorage.getItem(KUNCI_FALLBACK_LOKAL);
+        if (tersimpanLokal !== null) {
+          const parsedLokal = parseInt(tersimpanLokal, 10);
+          if (!Number.isNaN(parsedLokal)) angkaLokal = parsedLokal;
+        }
+        angkaLokal += 1;
+        localStorage.setItem(KUNCI_FALLBACK_LOKAL, String(angkaLokal));
+        if (!sudahDilepas) setTotalPengunjung(angkaLokal);
+      } catch (errLokal) {
+        if (!sudahDilepas) setTotalPengunjung((prev) => (prev || ANGKA_AWAL) + 1);
+      }
     })();
 
     return () => { sudahDilepas = true; };
@@ -1935,8 +1956,12 @@ export default function IuranWargaRTApp() {
     const rows = iuranMatrix.filter(r => r.userNama === m.nama);
     const dibayar = rows.filter(r => r.status === 'LUNAS').reduce((acc, r) => acc + r.nominal, 0);
     const pending = rows.filter(r => r.status === 'MENUNGGU VERIFIKASI').reduce((acc, r) => acc + r.nominal, 0);
-    const sisa = Math.max(0, m.target - dibayar);
-    const persen = Math.min(100, Math.round((dibayar / m.target) * 100));
+    // Akun Pengurus dibebaskan dari iuran bulanan (free) & TIDAK masuk laporan
+    // keuangan RT (lihat anggotaUntukKeuanganRT & rekapPerNomorPengajuan di
+    // atas), jadi di tabel monitoring ini Sisa-nya juga harus tampil 0 &
+    // Progress 100% (bukan ikut tampil "Sisa Rp540.000" seolah-olah nunggak).
+    const sisa = m.pengurus ? 0 : Math.max(0, m.target - dibayar);
+    const persen = m.pengurus ? 100 : Math.min(100, Math.round((dibayar / m.target) * 100));
     const bulanLunas = rows.filter(r => r.status === 'LUNAS').length;
     return { ...m, dibayar, pending, sisa, persen, bulanLunas };
   });
@@ -3829,9 +3854,6 @@ export default function IuranWargaRTApp() {
                   </div>
                 </div>
               )}
-              <a href={buatLinkWhatsapp(cmsTeks.infoKontak)} target="_blank" rel="noopener noreferrer" className="justify-center text-xs font-bold text-slate-500 hover:text-emerald-700 flex items-center gap-1.5 bg-slate-50 hover:bg-emerald-50 px-3 py-1.5 rounded-full border transition-colors duration-200">
-                <span className="text-emerald-600">●</span> Hubungi Kami: {cmsTeks.infoKontak}
-              </a>
             </div>
           </div>
 
@@ -3869,7 +3891,7 @@ export default function IuranWargaRTApp() {
                   <p className="text-[10px] text-slate-400 mt-2">Pastikan hanya transfer ke rekening resmi di atas. Nomor ini diatur langsung oleh panitia lewat Admin Panel.</p>
                 </div>
                 <div className="bg-white p-5 rounded-2xl border">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Hubungi Panitia</h4>
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Hubungi Pengurus</h4>
                   <p className="text-slate-700 font-bold">{cmsTeks.infoKontak}</p>
                   <a
                     href={buatLinkWhatsapp(cmsTeks.infoKontak)}
@@ -5337,6 +5359,9 @@ export default function IuranWargaRTApp() {
                                 <td className="py-2.5 pr-2 text-slate-500">{m.kelompok}</td>
                                 <td className="py-2.5 pr-2">
                                   <span className={`px-2 py-0.5 rounded text-[10px] font-black ${m.statusAnggota === 'Aktif' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>{m.statusAnggota}</span>
+                                  {m.pengurus && (
+                                    <span className="ml-1 px-2 py-0.5 rounded text-[10px] font-black bg-sky-100 text-sky-700">Bebas Iuran</span>
+                                  )}
                                 </td>
                                 <td className="py-2.5 pr-2 text-slate-700">{m.bulanLunas} / 12</td>
                                 <td className="py-2.5 pr-2 text-emerald-700">Rp {m.dibayar.toLocaleString('id-ID')}</td>
