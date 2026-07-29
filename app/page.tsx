@@ -60,6 +60,137 @@ function PilihanDropdown({ value, options, onChange, placeholder = 'Pilih' }) {
 }
 
 // =====================================================================
+// KOMPONEN: ANGKA BERJALAN (COUNT-UP ANIMATION)
+// -----------------------------------------------------------
+// Menganimasikan angka dari nilai sebelumnya naik pelan-pelan menuju
+// angka tertinggi/terbaru (bukan langsung "loncat" ganti angka),
+// dipakai untuk kartu statistik Pengunjung.
+// =====================================================================
+function AngkaBerjalan({ value, className = '' }) {
+  const [tampil, setTampil] = useState(0);
+  const prevRef = useRef(0);
+  useEffect(() => {
+    if (value === null || value === undefined || Number.isNaN(value)) return;
+    const dari = prevRef.current;
+    const ke = value;
+    if (dari === ke) { setTampil(ke); return; }
+    const durasi = 1100;
+    const mulai = performance.now();
+    let frameId;
+    const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+    const step = (now) => {
+      const progres = Math.min(1, (now - mulai) / durasi);
+      const nilaiSekarang = Math.round(dari + (ke - dari) * easeOutCubic(progres));
+      setTampil(nilaiSekarang);
+      if (progres < 1) {
+        frameId = requestAnimationFrame(step);
+      } else {
+        prevRef.current = ke;
+      }
+    };
+    frameId = requestAnimationFrame(step);
+    return () => { if (frameId) cancelAnimationFrame(frameId); };
+  }, [value]);
+  return <span className={className}>{tampil.toLocaleString('id-ID')}</span>;
+}
+
+// =====================================================================
+// KOMPONEN: SPARKLINE TREN (GRAFIK GARIS MINI)
+// -----------------------------------------------------------
+// Grafik garis kecil bergaya "sparkline" untuk memperlihatkan arah tren
+// kunjungan beberapa hari terakhir, mirip kartu statistik ala dashboard.
+// =====================================================================
+function SparklineTren({ data, className = '' }) {
+  if (!data || data.length < 2) return null;
+  const w = 100, h = 40;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * w;
+    const y = h - ((v - min) / range) * (h - 6) - 3;
+    return [x, y];
+  });
+  const pathD = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className={className} preserveAspectRatio="none">
+      <path d={pathD} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.9" />
+      {pts.map((p, i) => (
+        <circle key={i} cx={p[0]} cy={p[1]} r={i === pts.length - 1 ? 2.6 : 1.8} fill="currentColor" opacity={i === pts.length - 1 ? 1 : 0.7} />
+      ))}
+    </svg>
+  );
+}
+
+// =====================================================================
+// HOOK: TREN PENGUNJUNG HARIAN/MINGGUAN
+// -----------------------------------------------------------
+// Menyimpan "titik awal" (baseline) angka total pengunjung di tiap
+// tanggal ke localStorage perangkat, lalu menghitung selisihnya untuk
+// mendapatkan estimasi: Hari Ini, Kemarin, Minggu Ini & Minggu Lalu,
+// plus 7 titik terakhir untuk grafik sparkline. Karena counter total
+// bersifat kumulatif & dibagi bersama semua pengunjung, angka ini adalah
+// ESTIMASI tren berbasis kapan saja perangkat ini membuka website,
+// bukan pencatatan server terpisah per-hari.
+// =====================================================================
+function useTrenPengunjung(totalPengunjung) {
+  const [tren, setTren] = useState({ hariIni: 0, kemarin: 0, mingguIni: 0, mingguLalu: 0, spark: [] });
+  useEffect(() => {
+    if (totalPengunjung === null || totalPengunjung === undefined || typeof window === 'undefined') return;
+    try {
+      const KUNCI = 'riwayat-harian-pengunjung-rt40';
+      const now = new Date();
+      const keyDari = (d) => d.toISOString().slice(0, 10);
+      const todayKey = keyDari(now);
+
+      const hariIndex = (now.getDay() + 6) % 7; // 0 = Senin
+      const seninIni = new Date(now); seninIni.setDate(now.getDate() - hariIndex);
+      const seninLalu = new Date(seninIni); seninLalu.setDate(seninIni.getDate() - 7);
+      const kemarin = new Date(now); kemarin.setDate(now.getDate() - 1);
+      const sebelumKemarin = new Date(now); sebelumKemarin.setDate(now.getDate() - 2);
+
+      let riwayat = {};
+      try { riwayat = JSON.parse(localStorage.getItem(KUNCI) || '{}') || {}; } catch (e) { riwayat = {}; }
+
+      // Simpan baseline hari ini hanya sekali (kunjungan pertama hari ini di perangkat ini)
+      if (riwayat[todayKey] === undefined) riwayat[todayKey] = totalPengunjung;
+
+      // Bersihkan riwayat lama supaya localStorage tidak membengkak
+      const semuaTanggal = Object.keys(riwayat).sort();
+      if (semuaTanggal.length > 20) {
+        semuaTanggal.slice(0, semuaTanggal.length - 20).forEach((k) => delete riwayat[k]);
+      }
+      try { localStorage.setItem(KUNCI, JSON.stringify(riwayat)); } catch (e) { /* abaikan kalau storage penuh */ }
+
+      const ambil = (key, fallback) => (riwayat[key] !== undefined ? riwayat[key] : fallback);
+      const baseHariIni = riwayat[todayKey];
+      const baseKemarin = ambil(keyDari(kemarin), baseHariIni);
+      const baseSebelumKemarin = ambil(keyDari(sebelumKemarin), baseKemarin);
+      const baseSeninIni = ambil(keyDari(seninIni), baseHariIni);
+      const baseSeninLalu = ambil(keyDari(seninLalu), baseSeninIni);
+
+      const hasilHariIni = Math.max(0, totalPengunjung - baseHariIni);
+      const hasilKemarin = Math.max(0, baseHariIni - baseKemarin);
+      const hasilMingguIni = Math.max(0, totalPengunjung - baseSeninIni);
+      const hasilMingguLalu = Math.max(0, baseSeninIni - baseSeninLalu);
+
+      const spark = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now); d.setDate(now.getDate() - i);
+        const key = keyDari(d);
+        spark.push(riwayat[key] !== undefined ? riwayat[key] : baseHariIni);
+      }
+      spark.push(totalPengunjung);
+
+      setTren({ hariIni: hasilHariIni, kemarin: hasilKemarin, mingguIni: hasilMingguIni, mingguLalu: hasilMingguLalu, spark });
+    } catch (e) {
+      // biarkan nilai default kalau localStorage tidak tersedia (mis. mode privat)
+    }
+  }, [totalPengunjung]);
+  return tren;
+}
+
+// =====================================================================
 // URL WEB APP APPS SCRIPT DEFAULT (BAWAAN, TERTANAM DI KODE)
 // -----------------------------------------------------------
 // PENTING - INI PERBAIKAN UTAMA MASALAH "DATA TIDAK MASUK KE GOOGLE SHEETS":
@@ -245,6 +376,10 @@ export default function IuranWargaRTApp() {
 
     return () => { sudahDilepas = true; };
   }, []);
+
+  // Tren kunjungan (Hari Ini / Kemarin / Minggu Ini / Minggu Lalu + data sparkline)
+  // dihitung otomatis dari totalPengunjung di atas.
+  const trenPengunjung = useTrenPengunjung(totalPengunjung);
 
   // ==========================================
   // NOTIFIKASI DALAM AKUN (BADGE "BELUM DIBACA") - USER & ADMIN
@@ -1116,7 +1251,7 @@ export default function IuranWargaRTApp() {
         }));
       }
       setSheetStatus('synced');
-      if (!sunyi) showToast('Seluruh data website berhasil dimuat dari Google Sheets.');
+      if (!sunyi) showToast('Proses Completed.');
     } catch (err) {
       console.error(err);
       setSheetStatus('error');
@@ -3643,11 +3778,35 @@ export default function IuranWargaRTApp() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-center sm:justify-end">
-              {/* COUNTER PENGUNJUNG WEB - angka SAMA untuk semua orang & terus naik
-                  tiap kali ada yang membuka Web Utama (lihat useEffect totalPengunjung). */}
-              <span className="text-xs font-bold text-slate-500 flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-full border">
-                <span className="text-emerald-600">👁️</span> {totalPengunjung !== null ? totalPengunjung.toLocaleString('id-ID') : '...'} Pengunjung
-              </span>
+              {/* KARTU TREN PENGUNJUNG WEB - angka total SAMA untuk semua orang &
+                  terus naik tiap kali ada yang membuka Web Utama (lihat useEffect
+                  totalPengunjung), dilengkapi animasi hitung naik & grafik mini tren
+                  (lihat useTrenPengunjung). */}
+              <div className="flex items-center gap-3 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-slate-700/60 rounded-2xl px-3.5 py-2 shadow-md text-blue-300">
+                <SparklineTren data={trenPengunjung.spark} className="w-12 h-8 shrink-0" />
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <div className="pr-2.5 border-r border-slate-700">
+                    <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide leading-none">Total</p>
+                    <AngkaBerjalan value={totalPengunjung !== null ? totalPengunjung : 0} className="text-xs font-black text-white leading-tight" />
+                  </div>
+                  <div>
+                    <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide leading-none">Hari Ini</p>
+                    <p className="text-xs font-black text-white leading-tight">{trenPengunjung.hariIni.toLocaleString('id-ID')}</p>
+                  </div>
+                  <div>
+                    <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide leading-none">Kemarin</p>
+                    <p className="text-xs font-black text-white leading-tight">{trenPengunjung.kemarin.toLocaleString('id-ID')}</p>
+                  </div>
+                  <div>
+                    <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide leading-none">Mgg Ini</p>
+                    <p className="text-xs font-black text-white leading-tight">{trenPengunjung.mingguIni.toLocaleString('id-ID')}</p>
+                  </div>
+                  <div>
+                    <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide leading-none">Mgg Lalu</p>
+                    <p className="text-xs font-black text-white leading-tight">{trenPengunjung.mingguLalu.toLocaleString('id-ID')}</p>
+                  </div>
+                </div>
+              </div>
               <a href={buatLinkWhatsapp(cmsTeks.infoKontak)} target="_blank" rel="noopener noreferrer" className="justify-center text-xs font-bold text-slate-500 hover:text-emerald-700 flex items-center gap-1.5 bg-slate-50 hover:bg-emerald-50 px-3 py-1.5 rounded-full border transition-colors duration-200">
                 <span className="text-emerald-600">●</span> Hubungi Kami: {cmsTeks.infoKontak}
               </a>
