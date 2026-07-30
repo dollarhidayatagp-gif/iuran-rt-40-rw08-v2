@@ -60,6 +60,40 @@ function PilihanDropdown({ value, options, onChange, placeholder = 'Pilih' }) {
 }
 
 // =====================================================================
+// KOMPONEN: GAMBAR BISA DI-ZOOM (KLIK -> BUKA LIGHTBOX FULL PAGE)
+// -----------------------------------------------------------
+// Dipakai untuk semua foto Agenda Utama, Agenda Kegiatan, dan foto
+// Informasi Umum RT, baik di Web Utama (halaman publik), akun Warga,
+// maupun akun Bendahara/Admin. Saat diklik/tap, foto akan terbuka besar
+// di jendela pop-up (lightbox) lewat callback `onBuka`. Di laptop/desktop,
+// mengarahkan kursor ke foto akan memperbesarnya sedikit (lihat CSS
+// .zoomable-img-wrap) sebagai isyarat bahwa foto bisa diklik; di HP,
+// cukup disentuh/tap langsung untuk membuka.
+// =====================================================================
+function GambarZoom({ src, alt, className = '', onBuka }) {
+  if (!src) return null;
+  return (
+    <div
+      className="zoomable-img-wrap w-full h-full"
+      role="button"
+      tabIndex={0}
+      title="Klik untuk memperbesar foto"
+      onClick={() => onBuka(src, alt)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBuka(src, alt); } }}
+    >
+      <img
+        loading="lazy"
+        decoding="async"
+        src={src}
+        alt={alt}
+        className={className}
+        onError={(e) => { e.target.style.display = 'none'; }}
+      />
+    </div>
+  );
+}
+
+// =====================================================================
 // KOMPONEN: ANGKA BERJALAN (COUNT-UP ANIMATION)
 // -----------------------------------------------------------
 // Menganimasikan angka dari nilai sebelumnya naik pelan-pelan menuju
@@ -251,6 +285,25 @@ export default function IuranWargaRTApp() {
       .marquee-wrap { overflow: hidden; white-space: nowrap; }
       .marquee-track { display: inline-flex; width: max-content; animation: marqueeBerjalan 14s linear infinite; }
       .marquee-track span { padding-right: 3rem; }
+      /* GAMBAR BISA DI-ZOOM (KLIK UNTUK LIGHTBOX) - dipakai di semua foto Agenda,
+         Agenda Utama, & Informasi Umum RT (Web Utama, akun Warga, akun Bendahara).
+         Efek membesar (scale) saat kursor diarahkan HANYA aktif di perangkat yang
+         benar-benar punya mouse/cursor presisi (laptop/desktop), lewat media query
+         (hover: hover) & (pointer: fine), supaya di HP (layar sentuh) tidak ada efek
+         hover yang "nyangkut" setelah foto disentuh - untuk HP cukup tap untuk buka. */
+      .zoomable-img-wrap { cursor: zoom-in; }
+      .zoomable-img-wrap img { transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1); }
+      @media (hover: hover) and (pointer: fine) {
+        .zoomable-img-wrap:hover img { transform: scale(1.14); }
+      }
+      .zoomable-img-wrap:active img { transform: scale(1.06); }
+      /* LIGHTBOX / POP-UP FOTO PENUH */
+      @keyframes lightboxFadeIn { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes lightboxPopIn { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: scale(1); } }
+      .lightbox-overlay { animation: lightboxFadeIn 0.2s ease both; }
+      .lightbox-img-box { animation: lightboxPopIn 0.25s ease both; }
+      .lightbox-img { transition: transform 0.3s ease; cursor: zoom-in; }
+      .lightbox-img.is-zoomed { cursor: zoom-out; }
     `;
     document.head.appendChild(styleEl);
   }, []);
@@ -1550,6 +1603,34 @@ export default function IuranWargaRTApp() {
   };
 
   // ==========================================
+  // LIGHTBOX FOTO (ZOOM GAMBAR AGENDA & INFORMASI UMUM)
+  // -----------------------------------------------------------
+  // State global untuk pop-up foto yang bisa dibuka dari mana saja (Web Utama,
+  // akun Warga, akun Bendahara) lewat komponen <GambarZoom onBuka={bukaLightbox} />.
+  // `lightboxZoomed` dipakai supaya foto di dalam pop-up bisa diperbesar lagi
+  // dengan sekali klik (zoom in/out), dan tombol "Lihat Full Page" membuka foto
+  // resolusi aslinya di tab baru browser.
+  // ==========================================
+  const [lightboxImg, setLightboxImg] = useState(null);
+  const [lightboxZoomed, setLightboxZoomed] = useState(false);
+  const bukaLightbox = (src, alt) => {
+    if (!src) return;
+    setLightboxImg({ src, alt: alt || 'Foto' });
+    setLightboxZoomed(false);
+  };
+  const tutupLightbox = () => {
+    setLightboxImg(null);
+    setLightboxZoomed(false);
+  };
+  // Tombol ESC di keyboard (laptop) juga bisa menutup lightbox.
+  useEffect(() => {
+    if (!lightboxImg) return;
+    const handleEsc = (e) => { if (e.key === 'Escape') tutupLightbox(); };
+    document.addEventListener('keydown', handleEsc);
+    return () => document.removeEventListener('keydown', handleEsc);
+  }, [lightboxImg]);
+
+  // ==========================================
   // STATE MODAL, EMAIL SIMULASI & PENDAFTARAN BARU
   // ==========================================
   const [selectedKuitansi, setSelectedKuitansi] = useState(null);
@@ -2178,7 +2259,8 @@ export default function IuranWargaRTApp() {
   // ==========================================
   // CONTROLLER ACTIONS - CMS
   // ==========================================
-  const saveCms = () => {
+  const saveCms = (opts = {}) => {
+    const { silent = false } = opts;
     const teksBaru = {
       ...cmsTeks,
       namaRT: cmsForm.namaRT,
@@ -2234,8 +2316,58 @@ export default function IuranWargaRTApp() {
         daftarNomorRumahList: (teksBaru.daftarNomorRumahList || []).join('|'),
       }], teksBaru.appsScriptUrl);
     }
-    showToast('Seluruh konten website berhasil disimpan & langsung tersinkron ke semua akun warga!');
+    // AUTO-SAVE: kalau dipanggil otomatis (silent=true) dari efek debounce di
+    // bawah, jangan munculkan toast besar tiap kali admin selesai mengetik satu
+    // huruf - cukup update indikator kecil "✓ Tersimpan otomatis" di sebelah
+    // tombol Simpan. Toast besar hanya muncul saat admin klik tombol manual.
+    if (silent) {
+      setCmsAutoSaveStatus('saved');
+      setCmsLastSaved(new Date());
+    } else {
+      setCmsAutoSaveStatus('saved');
+      setCmsLastSaved(new Date());
+      showToast('Seluruh konten website berhasil disimpan & langsung tersinkron ke semua akun warga!');
+    }
   };
+
+  // ==========================================
+  // AUTO-SAVE CMS SUPER EDITOR (SETIAP PERUBAHAN LANGSUNG TERSIMPAN)
+  // -----------------------------------------------------------
+  // SEBELUMNYA: admin HARUS menekan tombol "Simpan Perubahan Konten" secara
+  // manual setelah mengedit, dan kalau lupa/klik pindah menu duluan, perubahan
+  // bisa hilang - jadi kalau cuma mau update SATU kolom saja, admin tetap harus
+  // ingat menekan simpan untuk SEMUA kolom.
+  // SEKARANG: setiap kali `cmsForm` berubah (admin mengetik/upload/hapus salah
+  // satu kolom), sistem otomatis menyimpan & menyinkronkan SELURUH form lagi
+  // ke `cmsTeks` + Google Sheets setelah admin berhenti mengetik sejenak (jeda
+  // 1.2 detik, memakai teknik "debounce" supaya tidak nyimpan di setiap
+  // ketikan huruf yang bisa membebani koneksi). Dengan begini, satu pembaruan
+  // kolom otomatis tersimpan sendiri tanpa perlu mengedit/menekan simpan ulang
+  // untuk kolom-kolom lainnya. Tombol manual "💾 Simpan Perubahan Konten" tetap
+  // ada sebagai cara memaksa simpan seketika (misalnya sebelum menutup tab).
+  // ==========================================
+  const [cmsAutoSaveStatus, setCmsAutoSaveStatus] = useState('idle'); // idle | saving | saved
+  const [cmsLastSaved, setCmsLastSaved] = useState(null);
+  const cmsFormPertamaKali = useRef(true);
+  useEffect(() => {
+    // Lewati auto-save pada saat pertama kali form dimuat (belum ada perubahan
+    // dari admin sama sekali), supaya tidak langsung "menyimpan" data yang
+    // baru saja dibaca dari Sheet/localStorage.
+    if (cmsFormPertamaKali.current) {
+      cmsFormPertamaKali.current = false;
+      return;
+    }
+    // Hanya aktif saat admin sedang membuka panel CMS Super Editor, supaya
+    // efek ini tidak ikut jalan waktu cmsForm disinkronkan ulang dari data
+    // Sheet ketika admin sedang di menu lain.
+    if (!(activeMenu === 'cms-setting' && role === 'admin')) return;
+    setCmsAutoSaveStatus('saving');
+    const timer = window.setTimeout(() => {
+      saveCms({ silent: true });
+    }, 1200);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cmsForm]);
 
   const handleFotoLatarChange = async (e) => {
     const file = e.target.files && e.target.files[0];
@@ -3760,6 +3892,50 @@ export default function IuranWargaRTApp() {
         </div>
       )}
 
+      {/* LIGHTBOX FOTO GLOBAL - dipakai oleh semua <GambarZoom /> di Web Utama,
+          akun Warga, & akun Bendahara (foto Agenda Utama, Agenda Kegiatan,
+          dan foto Informasi Umum RT). Klik area gelap/​tombol ✕/tombol ESC untuk
+          menutup; klik foto untuk zoom in-out; tombol "Lihat Full Page" membuka
+          foto resolusi asli di tab baru browser. */}
+      {lightboxImg && (
+        <div
+          className="lightbox-overlay fixed inset-0 z-[200] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6"
+          onClick={tutupLightbox}
+        >
+          <div className="absolute top-3 right-3 sm:top-5 sm:right-5 flex items-center gap-2 z-10">
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); window.open(lightboxImg.src, '_blank', 'noopener,noreferrer'); }}
+              className="bg-white/10 hover:bg-white/20 active:scale-95 text-white text-[11px] sm:text-xs font-bold px-3 sm:px-4 py-2 rounded-xl border border-white/20 backdrop-blur-sm transition-all duration-200 flex items-center gap-1.5"
+            >
+              <span>⛶</span><span className="hidden xs:inline sm:inline">Lihat Full Page</span>
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); tutupLightbox(); }}
+              className="bg-white/10 hover:bg-white/20 active:scale-95 text-white font-bold w-9 h-9 rounded-xl border border-white/20 backdrop-blur-sm transition-all duration-200 flex items-center justify-center"
+              title="Tutup"
+            >
+              ✕
+            </button>
+          </div>
+          <div
+            className="lightbox-img-box w-full h-full flex items-center justify-center overflow-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={lightboxImg.src}
+              alt={lightboxImg.alt}
+              onClick={() => setLightboxZoomed((z) => !z)}
+              className={`lightbox-img max-w-full max-h-[80vh] sm:max-h-[85vh] rounded-xl shadow-2xl select-none ${lightboxZoomed ? 'is-zoomed scale-125 sm:scale-150' : 'scale-100'}`}
+            />
+          </div>
+          <p className="absolute bottom-3 sm:bottom-5 left-1/2 -translate-x-1/2 text-white/70 text-[10px] sm:text-[11px] font-semibold text-center px-4 max-w-[92%]">
+            {lightboxImg.alt} • Klik foto untuk {lightboxZoomed ? 'kembali normal' : 'perbesar'}, atau tekan "Lihat Full Page" untuk buka di tab baru.
+          </p>
+        </div>
+      )}
+
       {/* SIMULATOR SWITCHER HEADER */}
       <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white px-3 sm:px-6 py-2.5 text-xs font-bold flex flex-wrap justify-between items-center gap-y-2 border-b border-emerald-900 shadow-md">
         <div className="flex items-center gap-2 min-w-0 overflow-hidden whitespace-nowrap">
@@ -3872,7 +4048,20 @@ export default function IuranWargaRTApp() {
                 <div className="relative">
                   <h2 className="text-xl font-black text-amber-300 mb-2 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">{cmsTeks.judulBeranda}</h2>
                   <p className="text-[11px] text-emerald-300 font-bold uppercase tracking-widest mb-3 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">{cmsTeks.tagline}</p>
-                  <p className="text-xs text-slate-300 leading-relaxed bg-slate-950/60 p-4 rounded-xl border border-slate-800">{cmsTeks.pengumuman}</p>
+                  <div className="text-xs text-slate-300 bg-slate-950/60 p-4 rounded-xl border border-slate-800 marquee-wrap">
+                    {/* RUNNING TEXT (MARQUEE) - teks pengumuman berjalan terus-menerus dari
+                        kanan ke kiri secara loop tanpa putus, supaya kotak pengumuman di
+                        Beranda selalu terlihat "hidup" & lebih menarik perhatian warga.
+                        Durasi animasi disesuaikan otomatis mengikuti panjang teks supaya
+                        kecepatan jalannya tetap terasa wajar walau teksnya pendek/panjang. */}
+                    <div
+                      className="marquee-track leading-relaxed"
+                      style={{ animationDuration: `${Math.max(12, (cmsTeks.pengumuman || '').length * 0.09)}s` }}
+                    >
+                      <span>{cmsTeks.pengumuman}</span>
+                      <span>{cmsTeks.pengumuman}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -3946,7 +4135,7 @@ export default function IuranWargaRTApp() {
                   <div className="rounded-2xl border overflow-hidden bg-slate-50 anim-fade">
                     <div className="w-full h-64 bg-slate-200 flex items-center justify-center overflow-hidden">
                       {agendaUtama.foto ? (
-                        <img loading="lazy" decoding="async" src={agendaUtama.foto} alt={agendaUtama.judul} className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
+                        <GambarZoom src={agendaUtama.foto} alt={agendaUtama.judul} className="w-full h-full object-cover" onBuka={bukaLightbox} />
                       ) : (
                         <span className="text-xs text-slate-400 font-bold">Belum ada foto agenda utama</span>
                       )}
@@ -3974,7 +4163,7 @@ export default function IuranWargaRTApp() {
                     <div key={k.id} className="rounded-xl border overflow-hidden bg-slate-50 anim-fade">
                       <div className="w-full h-28 bg-slate-200 flex items-center justify-center overflow-hidden">
                         {k.foto ? (
-                          <img loading="lazy" decoding="async" src={k.foto} alt={k.judul} className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
+                          <GambarZoom src={k.foto} alt={k.judul} className="w-full h-full object-cover" onBuka={bukaLightbox} />
                         ) : (
                           <span className="text-[10px] text-slate-400 font-bold">Belum ada foto</span>
                         )}
@@ -4001,7 +4190,7 @@ export default function IuranWargaRTApp() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div className="rounded-2xl overflow-hidden border bg-slate-100 h-56 flex items-center justify-center">
                     {cmsTeks.fotoRTUmum ? (
-                      <img loading="lazy" decoding="async" src={cmsTeks.fotoRTUmum} alt={cmsTeks.namaRT} className="w-full h-full object-cover" onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; e.target.insertAdjacentHTML('afterend', '<span class="text-xs text-slate-400 font-bold">Belum ada foto RT</span>'); }} />
+                      <GambarZoom src={cmsTeks.fotoRTUmum} alt={cmsTeks.namaRT} className="w-full h-full object-cover" onBuka={bukaLightbox} />
                     ) : (
                       <span className="text-xs text-slate-400 font-bold">Belum ada foto RT</span>
                     )}
@@ -5686,7 +5875,7 @@ export default function IuranWargaRTApp() {
                     <div className="rounded-2xl border overflow-hidden bg-slate-50 anim-fade">
                       <div className="w-full h-64 bg-slate-200 flex items-center justify-center overflow-hidden">
                         {agendaUtama.foto ? (
-                          <img loading="lazy" decoding="async" src={agendaUtama.foto} alt={agendaUtama.judul} className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
+                          <GambarZoom src={agendaUtama.foto} alt={agendaUtama.judul} className="w-full h-full object-cover" onBuka={bukaLightbox} />
                         ) : (
                           <span className="text-xs text-slate-400 font-bold">Belum ada foto agenda utama</span>
                         )}
@@ -5713,7 +5902,7 @@ export default function IuranWargaRTApp() {
                       <div key={k.id} className="rounded-xl border overflow-hidden bg-slate-50 anim-fade">
                         <div className="w-full h-28 bg-slate-200 flex items-center justify-center overflow-hidden">
                           {k.foto ? (
-                            <img loading="lazy" decoding="async" src={k.foto} alt={k.judul} className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
+                            <GambarZoom src={k.foto} alt={k.judul} className="w-full h-full object-cover" onBuka={bukaLightbox} />
                           ) : (
                             <span className="text-[10px] text-slate-400 font-bold">Belum ada foto</span>
                           )}
@@ -6321,7 +6510,7 @@ export default function IuranWargaRTApp() {
                     <div className="flex flex-col sm:flex-row gap-2">
                       <input type="text" placeholder="https://script.google.com/macros/s/xxxxx/exec" value={cmsForm.appsScriptUrl} onChange={(e) => setCmsForm({...cmsForm, appsScriptUrl: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50 font-mono text-[11px]" />
                       <button type="button" onClick={handleTestKoneksiSheet} disabled={sheetTesting} className="bg-slate-100 text-slate-700 font-bold px-4 py-2 rounded-xl whitespace-nowrap disabled:opacity-50">{sheetTesting ? 'Menguji...' : '🔌 Tes Koneksi'}</button>
-                      <button type="button" onClick={saveCms} className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold px-4 py-2 rounded-xl whitespace-nowrap">💾 Simpan URL</button>
+                      <button type="button" onClick={() => saveCms()} className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold px-4 py-2 rounded-xl whitespace-nowrap">💾 Simpan URL</button>
                     </div>
                     <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed">
                       Belum punya URL-nya? Buat Google Sheet baru → menu <strong>Extensions &gt; Apps Script</strong> → tempel kode backend yang sudah disiapkan → <strong>Deploy &gt; New deployment &gt; Web app</strong> (Execute as: Me, Who has access: Anyone) → salin URL yang diakhiri <code>/exec</code> ke sini. Setelah URL disimpan, data Anggota &amp; Iuran akan otomatis dimuat dari Sheet, dan setiap perubahan akan otomatis tersimpan kembali ke Sheet.
@@ -6333,9 +6522,22 @@ export default function IuranWargaRTApp() {
                   <div className="flex justify-between items-center gap-4 flex-wrap">
                     <div>
                       <h3 className="text-sm font-black text-slate-900">CMS Super Editor - Konten Website Utama</h3>
-                      <p className="text-[11px] text-slate-400 mt-0.5">Setiap perubahan di sini otomatis tersinkron ke halaman Beranda dan Informasi Umum seluruh warga.</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">Setiap perubahan langsung tersimpan &amp; tersinkron otomatis ke halaman Beranda dan Informasi Umum seluruh warga - tidak perlu klik simpan berkali-kali kalau cuma mengubah satu kolom.</p>
                     </div>
-                    <button onClick={saveCms} className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold px-6 py-2.5 rounded-xl whitespace-nowrap transition-transform duration-150 hover:scale-[1.02] shadow-lg">💾 Simpan Perubahan Konten</button>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {/* INDIKATOR AUTO-SAVE - muncul kecil di samping tombol, memberi tahu
+                          admin bahwa perubahan sudah otomatis tersimpan tanpa perlu diklik. */}
+                      {cmsAutoSaveStatus !== 'idle' && (
+                        <span className={`text-[10px] font-bold flex items-center gap-1 ${cmsAutoSaveStatus === 'saving' ? 'text-amber-600' : 'text-emerald-700'}`}>
+                          {cmsAutoSaveStatus === 'saving' ? (
+                            <>⏳ Menyimpan otomatis...</>
+                          ) : (
+                            <>✓ Tersimpan otomatis{cmsLastSaved ? ` • ${cmsLastSaved.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}</>
+                          )}
+                        </span>
+                      )}
+                      <button onClick={() => saveCms()} className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold px-6 py-2.5 rounded-xl whitespace-nowrap transition-transform duration-150 hover:scale-[1.02] shadow-lg">💾 Simpan Sekarang</button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-3">
@@ -6597,8 +6799,17 @@ export default function IuranWargaRTApp() {
                     </div>
                   </div>
 
-                  <div className="border-t pt-4 flex justify-end">
-                    <button onClick={saveCms} className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold px-8 py-2.5 rounded-xl transition-transform duration-150 hover:scale-[1.02] shadow-lg">💾 Simpan Perubahan Konten</button>
+                  <div className="border-t pt-4 flex justify-end items-center gap-3 flex-wrap">
+                    {cmsAutoSaveStatus !== 'idle' && (
+                      <span className={`text-[10px] font-bold flex items-center gap-1 ${cmsAutoSaveStatus === 'saving' ? 'text-amber-600' : 'text-emerald-700'}`}>
+                        {cmsAutoSaveStatus === 'saving' ? (
+                          <>⏳ Menyimpan otomatis...</>
+                        ) : (
+                          <>✓ Tersimpan otomatis{cmsLastSaved ? ` • ${cmsLastSaved.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}</>
+                        )}
+                      </span>
+                    )}
+                    <button onClick={() => saveCms()} className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold px-8 py-2.5 rounded-xl transition-transform duration-150 hover:scale-[1.02] shadow-lg">💾 Simpan Sekarang</button>
                   </div>
                 </div>
 
@@ -6683,7 +6894,7 @@ export default function IuranWargaRTApp() {
 
                   <div className="rounded-xl border overflow-hidden bg-slate-50">
                     <div className="w-full h-40 bg-slate-200 flex items-center justify-center overflow-hidden">
-                      {agendaUtama.foto ? <img loading="lazy" decoding="async" src={agendaUtama.foto} alt={agendaUtama.judul} className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} /> : <span className="text-[10px] text-slate-400 font-bold">Belum ada foto agenda utama</span>}
+                      {agendaUtama.foto ? <GambarZoom src={agendaUtama.foto} alt={agendaUtama.judul} className="w-full h-full object-cover" onBuka={bukaLightbox} /> : <span className="text-[10px] text-slate-400 font-bold">Belum ada foto agenda utama</span>}
                     </div>
                     <div className="p-3">
                       <p className="text-slate-400 font-bold text-[10px]">{formatAgendaLengkap(agendaUtama.tanggal, agendaUtama.jam)}</p>
@@ -6733,7 +6944,7 @@ export default function IuranWargaRTApp() {
                     {kegiatanList.map(k => (
                       <div key={k.id} className={`rounded-xl border overflow-hidden bg-slate-50 anim-fade ${editingKegiatanId === k.id ? 'ring-2 ring-amber-400' : ''}`}>
                         <div className="w-full h-24 bg-slate-200 flex items-center justify-center overflow-hidden">
-                          {k.foto ? <img loading="lazy" decoding="async" src={k.foto} alt={k.judul} className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} /> : <span className="text-[10px] text-slate-400 font-bold">Belum ada foto</span>}
+                          {k.foto ? <GambarZoom src={k.foto} alt={k.judul} className="w-full h-full object-cover" onBuka={bukaLightbox} /> : <span className="text-[10px] text-slate-400 font-bold">Belum ada foto</span>}
                         </div>
                         <div className="p-3">
                           <p className="text-slate-400 font-bold text-[10px]">{formatAgendaLengkap(k.tanggal, k.jam)}</p>
@@ -6966,6 +7177,7 @@ export default function IuranWargaRTApp() {
                 <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Tanggal Pelunasan</span><strong>{pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).tanggal}</strong></div>
                 <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Jam Pelunasan</span><strong>{pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).jam}</strong></div>
                 <div className="flex justify-between items-center pt-1"><span className="text-slate-500">Status</span><span className="bg-emerald-700 text-white text-[10px] px-2 py-0.5 rounded font-sans font-bold">LUNAS</span></div>
+                <div className="flex justify-between border-t pt-2"><span className="text-slate-500">Diverifikasi oleh</span><strong className="text-emerald-800">Bendahara RT {getBendaharaRtNama()}</strong></div>
               </div>
 
               <div className="flex justify-between items-end mt-6 font-sans">
