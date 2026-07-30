@@ -1455,6 +1455,34 @@ export default function IuranWargaRTApp() {
   ]);
 
   // ==========================================
+  // 3A2. DATA IURAN & TUNGGAKAN KHUSUS SIMULASI AKUN (ISOLASI TOTAL)
+  // -----------------------------------------------------------
+  // PENTING - PERBAIKAN KEBOCORAN DATA: sebelumnya tombol "🧪 Simulasi Akun
+  // Pengguna" (nama contoh "Hidayat") memakai NAMA YANG SAMA dengan salah satu
+  // baris contoh di `iuranMatrix` ASLI di atas. Akibatnya saat pengunjung
+  // mencoba simulasi & upload "bukti transfer", data itu ikut tertulis ke
+  // `iuranMatrix` ASLI yang sama-sama dibaca oleh Dashboard Admin/Bendahara
+  // (daftar Pending Verifikasi, total dana masuk, dst) dan bisa ikut
+  // tersinkron ke Google Sheets sungguhan - padahal itu cuma iseng simulasi.
+  // SEKARANG: seluruh data pembayaran & kuitansi untuk SIMULASI disimpan di
+  // state terpisah ini (`simIuranMatrix` / `simTunggakanList`). Kapan pun
+  // `isSimulatedSession === true`, SEMUA baca-tulis iuran/tunggakan/kuitansi
+  // diarahkan ke sini saja - TIDAK PERNAH menyentuh `iuranMatrix`/`tunggakanList`
+  // asli, TIDAK mengirim notifikasi ke Admin sungguhan, dan TIDAK sync ke
+  // Google Sheets. Hanya akun warga yang benar-benar login resmi (sudah
+  // didaftarkan & diverifikasi Admin) yang datanya terhubung ke Dashboard
+  // Admin & Google Sheets yang sebenarnya.
+  // ==========================================
+  const [simIuranMatrix, setSimIuranMatrix] = useState([
+    { userNama: 'Hidayat', bulanId: 1, bulanNama: 'Januari', nominal: 45000, status: 'LUNAS', tglBayar: '10 Januari 2026', waktuVerifikasi: '10 Januari 2026, 09.15 WIB', buktiUrl: buatBuktiDummy('Hidayat - Januari 2026 (Simulasi)'), buktiNamaFile: 'contoh_bukti_jan.jpg' },
+    { userNama: 'Hidayat', bulanId: 2, bulanNama: 'Februari', nominal: 45000, status: 'LUNAS', tglBayar: '09 Februari 2026', waktuVerifikasi: '09 Februari 2026, 08.40 WIB', buktiUrl: buatBuktiDummy('Hidayat - Februari 2026 (Simulasi)'), buktiNamaFile: 'contoh_bukti_feb.jpg' },
+    { userNama: 'Hidayat', bulanId: 3, bulanNama: 'Maret', nominal: 45000, status: 'MENUNGGU VERIFIKASI', tglBayar: '11 Juli 2026', buktiUrl: buatBuktiDummy('Hidayat - Maret 2026 (Simulasi)', '#b45309'), buktiNamaFile: 'contoh_bukti_mar.jpg' },
+    { userNama: 'Siti Aminah', bulanId: 1, bulanNama: 'Januari', nominal: 45000, status: 'LUNAS', tglBayar: '12 Januari 2026', waktuVerifikasi: '12 Januari 2026, 10.05 WIB', buktiUrl: buatBuktiDummy('Siti Aminah - Januari 2026 (Simulasi)'), buktiNamaFile: 'contoh_bukti_siti.jpg' },
+  ]);
+  const [simTunggakanList, setSimTunggakanList] = useState([]);
+
+
+  // ==========================================
   // 3B. TUNGGAKAN (TAGIHAN BELUM LUNAS YANG DIBAWA LINTAS PERIODE)
   // -----------------------------------------------------------
   // PENTING: sebelum perbaikan ini, saat admin menutup periode (lihat
@@ -1634,6 +1662,15 @@ export default function IuranWargaRTApp() {
   // STATE MODAL, EMAIL SIMULASI & PENDAFTARAN BARU
   // ==========================================
   const [selectedKuitansi, setSelectedKuitansi] = useState(null);
+  // Tombol ESC juga bisa menutup pop-up Kuitansi Digital (selain klik ✕ atau
+  // klik area gelap di luar kartu kuitansi) - jaga-jaga tambahan supaya kuitansi
+  // selalu bisa ditutup walau di layar kecil/kuitansi sedang panjang ke bawah.
+  useEffect(() => {
+    if (!selectedKuitansi) return;
+    const handleEsc = (e) => { if (e.key === 'Escape') setSelectedKuitansi(null); };
+    document.addEventListener('keydown', handleEsc);
+    return () => document.removeEventListener('keydown', handleEsc);
+  }, [selectedKuitansi]);
   const [previewBukti, setPreviewBukti] = useState(null); // { userNama, bulanNama, nominal, tglBayar, buktiUrl, buktiNamaFile, status }
   const [showEmailModal, setShowEmailModal] = useState(null);
   const [konfirmasiUploadBukti, setKonfirmasiUploadBukti] = useState(null); // { file, bulanNama, tanggalBayar, nominal }
@@ -1946,9 +1983,10 @@ export default function IuranWargaRTApp() {
   // ==========================================
   // REAL-TIME METRIC CALCULATION (USER)
   // ==========================================
-  const userRows = iuranMatrix.filter(item => item.userNama === activeUserSession.nama);
+  const userRows = (isSimulatedSession ? simIuranMatrix : iuranMatrix).filter(item => item.userNama === activeUserSession.nama);
   // Tunggakan (tagihan belum lunas dari periode yang sudah ditutup admin) milik warga yang sedang login.
-  const userTunggakan = tunggakanList.filter(item => item.userNama === activeUserSession.nama);
+  // Simulasi -> selalu pakai simTunggakanList (terisolasi), TIDAK PERNAH baca tunggakanList asli.
+  const userTunggakan = (isSimulatedSession ? simTunggakanList : tunggakanList).filter(item => item.userNama === activeUserSession.nama);
   const userTunggakanBelumLunas = userTunggakan.filter(item => item.status !== 'LUNAS');
   const userTotalTunggakan = userTunggakanBelumLunas.reduce((acc, t) => acc + Number(t.nominal || 0), 0);
   const userDanaMasuk = userRows.filter(r => r.status === 'LUNAS').reduce((acc, r) => acc + r.nominal, 0);
@@ -2919,6 +2957,73 @@ export default function IuranWargaRTApp() {
     if (!konfirmasiUploadBukti) return;
     const { file, bulanNama, tanggalBayar, nominal, tunggakanId } = konfirmasiUploadBukti;
     setKonfirmasiUploadBukti(null);
+
+    // ==========================================
+    // JALUR SIMULASI (isSimulatedSession) - 100% LOKAL & TERISOLASI
+    // -----------------------------------------------------------
+    // TIDAK upload file ke Google Drive sungguhan, TIDAK menulis ke
+    // iuranMatrix/tunggakanList asli, TIDAK mengirim notifikasi ke Admin asli,
+    // dan TIDAK sync ke Google Sheets. Supaya pengunjung yang cuma mencoba
+    // tombol "🧪 Simulasi Akun Pengguna" tetap bisa merasakan alur pembayaran
+    // & kuitansi lengkap (Menunggu Verifikasi -> otomatis LUNAS -> Kuitansi),
+    // tanpa data contohnya pernah nyangkut ke Dashboard Admin/Bendahara asli.
+    // ==========================================
+    if (isSimulatedSession) {
+      showToast('(Simulasi) Mengunggah bukti transfer...', 'sukses');
+      const buktiUrlSimulasi = buatBuktiDummy(`${activeUserSession.nama} - ${bulanNama} (Simulasi)`, '#b45309');
+
+      if (tunggakanId) {
+        setSimTunggakanList(prev => prev.map(t => t.id === tunggakanId ? {
+          ...t,
+          nominal: Number(nominal),
+          status: 'MENUNGGU VERIFIKASI',
+          tglBayar: formatTanggalIndo(tanggalBayar),
+          buktiUrl: buktiUrlSimulasi,
+          buktiNamaFile: file.name
+        } : t));
+        setFormBayarInput(prev => { const next = { ...prev }; delete next[`TGK-${tunggakanId}`]; return next; });
+        showToast(`(Simulasi) Bukti pelunasan tunggakan ${bulanNama} terkirim! Menunggu verifikasi contoh Bendahara.`);
+        // Auto-verifikasi lokal setelah beberapa detik supaya alur kuitansi
+        // ikut bisa dicoba/didemokan, tanpa perlu admin sungguhan.
+        window.setTimeout(() => {
+          const waktuVerifikasi = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' WIB';
+          setSimTunggakanList(prev => prev.map(t => t.id === tunggakanId ? { ...t, status: 'LUNAS', waktuVerifikasi } : t));
+          showToast(`(Simulasi) Pelunasan tunggakan ${bulanNama} otomatis diverifikasi contoh Bendahara demo. Kuitansi sudah bisa dilihat.`);
+        }, 3500);
+        return;
+      }
+
+      const recordBaruSimulasi = {
+        userNama: activeUserSession.nama,
+        bulanId: DAFTAR_BULAN.find(b => b.nama === bulanNama).id,
+        bulanNama,
+        nominal: Number(nominal),
+        status: 'MENUNGGU VERIFIKASI',
+        tglBayar: formatTanggalIndo(tanggalBayar),
+        buktiUrl: buktiUrlSimulasi,
+        buktiNamaFile: file.name
+      };
+      setSimIuranMatrix(prev => {
+        const sudahAda = prev.some(item => item.userNama === activeUserSession.nama && item.bulanNama === bulanNama);
+        return sudahAda
+          ? prev.map(item => (item.userNama === activeUserSession.nama && item.bulanNama === bulanNama) ? recordBaruSimulasi : item)
+          : [...prev, recordBaruSimulasi];
+      });
+      setFormBayarInput(prev => { const next = { ...prev }; delete next[bulanNama]; return next; });
+      showToast(`(Simulasi) Bukti transfer ${bulanNama} terkirim! Menunggu verifikasi contoh Bendahara.`);
+      // Auto-verifikasi lokal (bukan verifikasi Admin sungguhan) supaya status
+      // LUNAS & tombol "Lihat Kuitansi" ikut bisa dicoba dalam mode simulasi.
+      window.setTimeout(() => {
+        const waktuVerifikasi = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' WIB';
+        setSimIuranMatrix(prev => prev.map(item => (item.userNama === activeUserSession.nama && item.bulanNama === bulanNama) ? { ...item, status: 'LUNAS', waktuVerifikasi } : item));
+        showToast(`(Simulasi) Pembayaran ${bulanNama} otomatis diverifikasi contoh Bendahara demo. Kuitansi sudah bisa dilihat.`);
+      }, 3500);
+      return;
+    }
+
+    // ==========================================
+    // JALUR AKUN ASLI (sudah terdaftar & login resmi) - TERHUBUNG ke Admin & Sheets
+    // ==========================================
     showToast('Mengunggah bukti transfer...', 'sukses');
     // Bukti transfer diupload sebagai FILE ASLI ke Google Drive (folder "Bukti-Transfer"),
     // bukan base64 di sel Sheet, supaya file besar tidak gagal tersimpan (batas ~50.000
@@ -5228,7 +5333,7 @@ export default function IuranWargaRTApp() {
                                           <span className="text-amber-600 text-[10px] font-bold whitespace-nowrap">Menunggu Bendahara</span>
                                         )}
                                         {status === 'LUNAS' && (
-                                          <button onClick={() => setSelectedKuitansi({ nama: activeUserSession.nama, nomorRumah: activeUserSession.nomorRumah || activeUserSession.nama, email: activeUserSession.email, bulan: bln.nama, angsuranKe: bln.id, nominal: matchRow ? matchRow.nominal : IURAN_BULANAN, tanggal: matchRow.tglBayar || '10 Jan 2026', waktuLunas: (matchRow && matchRow.waktuVerifikasi) || (matchRow && matchRow.tglBayar) || '10 Januari 2026', noKuitansi: `IWR-${periodeTahun}-${String(bln.id).padStart(4, '0')}-${activeUserSession.id}` })} className="bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-[10px] transition-transform hover:scale-[1.03] whitespace-nowrap">Lihat Kuitansi</button>
+                                          <button onClick={() => setSelectedKuitansi({ nama: activeUserSession.nama, nomorRumah: activeUserSession.nomorRumah || activeUserSession.nama, email: activeUserSession.email, bulan: bln.nama, angsuranKe: bln.id, nominal: matchRow ? matchRow.nominal : IURAN_BULANAN, tanggal: matchRow.tglBayar || '10 Jan 2026', waktuLunas: (matchRow && matchRow.waktuVerifikasi) || (matchRow && matchRow.tglBayar) || '10 Januari 2026', noKuitansi: `${isSimulatedSession ? 'SIMULASI' : 'IWR'}-${periodeTahun}-${String(bln.id).padStart(4, '0')}-${activeUserSession.id}`, isSimulasi: isSimulatedSession })} className="bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-[10px] transition-transform hover:scale-[1.03] whitespace-nowrap">Lihat Kuitansi</button>
                                         )}
                                       </div>
                                       <div className="min-w-[84px] flex justify-end">
@@ -7148,73 +7253,90 @@ export default function IuranWargaRTApp() {
 
       {/* MODAL PREVIEW KUITANSI PROFESIONAL (DENGAN KOP RT) */}
       {selectedKuitansi && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex justify-center items-center p-4 z-50 anim-fade">
-          <div className="bg-white w-full max-w-md rounded-3xl p-0 relative border overflow-hidden shadow-2xl anim-pop">
-            <button onClick={() => setSelectedKuitansi(null)} className="absolute top-4 right-4 bg-white/90 text-slate-700 w-8 h-8 rounded-full font-black z-10 shadow transition-transform hover:scale-110">✕</button>
+        <div
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex justify-center items-center p-4 z-50 anim-fade"
+          onClick={() => setSelectedKuitansi(null)}
+        >
+          {/* PERBAIKAN UKURAN MODAL: dibatasi max-h-[90vh] + flex-col supaya kuitansi
+              yang kontennya panjang TIDAK PERNAH melebihi tinggi layar. Tombol ✕
+              sengaja diletakkan di LUAR area scroll (sebagai sibling, bukan anak dari
+              div yang overflow-y-auto) supaya selalu menempel & bisa diklik di pojok
+              kanan-atas kapan pun, walau isi kuitansi di-scroll ke bawah. Klik area
+              gelap di luar kartu, atau tombol ✕, sama-sama menutup kuitansi. */}
+          <div
+            className="bg-white w-full max-w-md max-h-[90vh] rounded-3xl relative border shadow-2xl anim-pop flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button onClick={() => setSelectedKuitansi(null)} className="absolute top-3 right-3 bg-white text-slate-700 w-8 h-8 rounded-full font-black z-20 shadow-lg border border-slate-200 flex items-center justify-center transition-transform hover:scale-110">✕</button>
 
-            {/* KOP SURAT */}
-            <div className="bg-emerald-800 text-white px-6 pt-6 pb-5 text-center">
-              {cmsTeks.logoRT && (
-                <img loading="lazy" decoding="async" src={cmsTeks.logoRT} alt="Logo" className="w-12 h-12 object-contain bg-white rounded-lg mx-auto mb-2 p-1" onError={(e) => { e.target.style.display = 'none'; }} />
-              )}
-              <p className="text-[10px] uppercase tracking-widest text-emerald-200 font-bold">Bendahara Iuran Warga</p>
-              <h4 className="font-black tracking-wide text-base mt-1">{cmsTeks.namaRT}</h4>
-              <p className="text-[10px] text-emerald-200 mt-1 leading-relaxed">{cmsTeks.alamatRT}</p>
-              <p className="text-[10px] text-emerald-200">Kontak: {cmsTeks.infoKontak}</p>
-            </div>
-
-            <div className="px-6 py-5 font-serif text-slate-800">
-              <div className="flex justify-between items-center mb-4">
-                <h5 className="font-black tracking-widest text-sm">KWITANSI RESMI</h5>
-                <span className="text-[10px] font-sans font-bold text-slate-400">No. {selectedKuitansi.noKuitansi}</span>
+            <div className="overflow-y-auto">
+              {/* KOP SURAT */}
+              <div className="bg-emerald-800 text-white px-6 pt-6 pb-5 text-center">
+                {cmsTeks.logoRT && (
+                  <img loading="lazy" decoding="async" src={cmsTeks.logoRT} alt="Logo" className="w-12 h-12 object-contain bg-white rounded-lg mx-auto mb-2 p-1" onError={(e) => { e.target.style.display = 'none'; }} />
+                )}
+                {selectedKuitansi.isSimulasi && (
+                  <span className="inline-block bg-amber-400 text-amber-950 text-[9px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full mb-2">🧪 Contoh / Simulasi - Bukan Kuitansi Asli</span>
+                )}
+                <p className="text-[10px] uppercase tracking-widest text-emerald-200 font-bold">Bendahara Iuran Warga</p>
+                <h4 className="font-black tracking-wide text-base mt-1">{cmsTeks.namaRT}</h4>
+                <p className="text-[10px] text-emerald-200 mt-1 leading-relaxed">{cmsTeks.alamatRT}</p>
+                <p className="text-[10px] text-emerald-200">Kontak: {cmsTeks.infoKontak}</p>
               </div>
 
-              <div className="space-y-2 text-xs">
-                <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Sudah diterima dari</span><strong>{selectedKuitansi.nama}</strong></div>
-                <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Nomor Rumah/Blok</span><strong className="text-emerald-800">{selectedKuitansi.nomorRumah || selectedKuitansi.nama}</strong></div>
-                <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Untuk pembayaran</span><strong>Iuran Warga Bln. {selectedKuitansi.bulan} {getTahunUntukBulan(selectedKuitansi.bulan)} (Angsuran Ke-{selectedKuitansi.angsuranKe})</strong></div>
-                <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Nominal</span><strong className="text-emerald-800">Rp {selectedKuitansi.nominal.toLocaleString('id-ID')}</strong></div>
-                <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Tanggal Pelunasan</span><strong>{pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).tanggal}</strong></div>
-                <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Jam Pelunasan</span><strong>{pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).jam}</strong></div>
-                <div className="flex justify-between items-center pt-1"><span className="text-slate-500">Status</span><span className="bg-emerald-700 text-white text-[10px] px-2 py-0.5 rounded font-sans font-bold">LUNAS</span></div>
-                <div className="flex justify-between border-t pt-2"><span className="text-slate-500">Diverifikasi oleh</span><strong className="text-emerald-800">Bendahara RT {getBendaharaRtNama()}</strong></div>
-              </div>
-
-              <div className="flex justify-between items-end mt-6 font-sans">
-                <div className="text-center">
-                  <div className="w-16 h-16 border-2 border-slate-300 rounded-lg flex items-center justify-center bg-slate-50 p-1">
-                    <img
-                      loading="lazy"
-                      decoding="async"
-                      alt="QR Verifikasi Kuitansi"
-                      className="w-full h-full object-contain"
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=0&data=${encodeURIComponent(`KWITANSI RESMI ${selectedKuitansi.noKuitansi}\n${cmsTeks.namaRT}\nDiterima dari: ${selectedKuitansi.nama}\nNomor Rumah/Blok: ${selectedKuitansi.nomorRumah || selectedKuitansi.nama}\nBulan: ${selectedKuitansi.bulan} ${getTahunUntukBulan(selectedKuitansi.bulan)}\nNominal: Rp ${selectedKuitansi.nominal.toLocaleString('id-ID')}\nTanggal Pelunasan: ${pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).tanggal}\nJam Pelunasan: ${pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).jam}\nStatus: LUNAS - Diverifikasi Bendahara RT ${getBendaharaRtNama()}`)}`}
-                      onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }}
-                    />
-                  </div>
-                  <p className="text-[9px] text-slate-400 mt-1 max-w-[80px] leading-tight">Scan QR untuk verifikasi tanggal, jam &amp; status pelunasan</p>
+              <div className="px-6 py-5 font-serif text-slate-800">
+                <div className="flex justify-between items-center mb-4">
+                  <h5 className="font-black tracking-widest text-sm">KWITANSI RESMI</h5>
+                  <span className="text-[10px] font-sans font-bold text-slate-400">No. {selectedKuitansi.noKuitansi}</span>
                 </div>
-                <div className="text-center">
-                  <p className="text-[10px] text-slate-400 mb-1">Bendahara RT</p>
-                  {cmsTeks.tandaTanganBendahara ? (
-                    <div className="w-28 h-16 mx-auto flex items-end justify-center">
-                      <img loading="lazy" decoding="async" src={cmsTeks.tandaTanganBendahara} alt="Tanda Tangan Bendahara RT" className="max-w-full max-h-full object-contain" onError={(e) => { e.target.style.display = 'none'; }} />
+
+                <div className="space-y-2 text-xs">
+                  <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Sudah diterima dari</span><strong>{selectedKuitansi.nama}</strong></div>
+                  <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Nomor Rumah/Blok</span><strong className="text-emerald-800">{selectedKuitansi.nomorRumah || selectedKuitansi.nama}</strong></div>
+                  <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Untuk pembayaran</span><strong>Iuran Warga Bln. {selectedKuitansi.bulan} {getTahunUntukBulan(selectedKuitansi.bulan)} (Angsuran Ke-{selectedKuitansi.angsuranKe})</strong></div>
+                  <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Nominal</span><strong className="text-emerald-800">Rp {selectedKuitansi.nominal.toLocaleString('id-ID')}</strong></div>
+                  <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Tanggal Pelunasan</span><strong>{pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).tanggal}</strong></div>
+                  <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Jam Pelunasan</span><strong>{pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).jam}</strong></div>
+                  <div className="flex justify-between items-center pt-1"><span className="text-slate-500">Status</span><span className="bg-emerald-700 text-white text-[10px] px-2 py-0.5 rounded font-sans font-bold">LUNAS</span></div>
+                  <div className="flex justify-between border-t pt-2"><span className="text-slate-500">Diverifikasi oleh</span><strong className="text-emerald-800">Bendahara RT {getBendaharaRtNama()}</strong></div>
+                </div>
+
+                <div className="flex justify-between items-end mt-6 font-sans">
+                  <div className="text-center">
+                    <div className="w-16 h-16 border-2 border-slate-300 rounded-lg flex items-center justify-center bg-slate-50 p-1">
+                      <img
+                        loading="lazy"
+                        decoding="async"
+                        alt="QR Verifikasi Kuitansi"
+                        className="w-full h-full object-contain"
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=0&data=${encodeURIComponent(`KWITANSI RESMI ${selectedKuitansi.noKuitansi}\n${cmsTeks.namaRT}\nDiterima dari: ${selectedKuitansi.nama}\nNomor Rumah/Blok: ${selectedKuitansi.nomorRumah || selectedKuitansi.nama}\nBulan: ${selectedKuitansi.bulan} ${getTahunUntukBulan(selectedKuitansi.bulan)}\nNominal: Rp ${selectedKuitansi.nominal.toLocaleString('id-ID')}\nTanggal Pelunasan: ${pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).tanggal}\nJam Pelunasan: ${pisahTanggalJam(selectedKuitansi.waktuLunas || selectedKuitansi.tanggal).jam}\nStatus: LUNAS - Diverifikasi Bendahara RT ${getBendaharaRtNama()}`)}`}
+                        onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }}
+                      />
                     </div>
-                  ) : (
-                    <svg viewBox="0 0 100 100" className="w-20 h-20 mx-auto -rotate-6 opacity-90">
-                      <polygon points="50,4 89.85,27 89.85,73 50,96 10.15,73 10.15,27" fill="none" stroke="#7f1d1d" strokeWidth="3" strokeLinejoin="round" />
-                      <polygon points="50,13 82.2,31.5 82.2,68.5 50,87 17.8,68.5 17.8,31.5" fill="none" stroke="#7f1d1d" strokeWidth="1.3" strokeLinejoin="round" />
-                      <text x="50" y="27" textAnchor="middle" fill="#7f1d1d" fontSize="5.2" fontWeight="900" letterSpacing="0.2">BENDAHARA RT</text>
-                      <text x="50" y="59" textAnchor="middle" fill="#7f1d1d" fontSize="18" fontWeight="900" fontFamily="serif" letterSpacing="1">LUNAS</text>
-                      <text x="50" y="78" textAnchor="middle" fill="#7f1d1d" fontSize="5" fontWeight="800" letterSpacing="0.2">SAH &amp; TERVERIFIKASI</text>
-                    </svg>
-                  )}
-                  <p className="text-[11px] font-bold border-t border-slate-400 pt-1 mt-1">{getBendaharaRtNama()}</p>
+                    <p className="text-[9px] text-slate-400 mt-1 max-w-[80px] leading-tight">Scan QR untuk verifikasi tanggal, jam &amp; status pelunasan</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-slate-400 mb-1">Bendahara RT</p>
+                    {cmsTeks.tandaTanganBendahara ? (
+                      <div className="w-28 h-16 mx-auto flex items-end justify-center">
+                        <img loading="lazy" decoding="async" src={cmsTeks.tandaTanganBendahara} alt="Tanda Tangan Bendahara RT" className="max-w-full max-h-full object-contain" onError={(e) => { e.target.style.display = 'none'; }} />
+                      </div>
+                    ) : (
+                      <svg viewBox="0 0 100 100" className="w-20 h-20 mx-auto -rotate-6 opacity-90">
+                        <polygon points="50,4 89.85,27 89.85,73 50,96 10.15,73 10.15,27" fill="none" stroke="#7f1d1d" strokeWidth="3" strokeLinejoin="round" />
+                        <polygon points="50,13 82.2,31.5 82.2,68.5 50,87 17.8,68.5 17.8,31.5" fill="none" stroke="#7f1d1d" strokeWidth="1.3" strokeLinejoin="round" />
+                        <text x="50" y="27" textAnchor="middle" fill="#7f1d1d" fontSize="5.2" fontWeight="900" letterSpacing="0.2">BENDAHARA RT</text>
+                        <text x="50" y="59" textAnchor="middle" fill="#7f1d1d" fontSize="18" fontWeight="900" fontFamily="serif" letterSpacing="1">LUNAS</text>
+                        <text x="50" y="78" textAnchor="middle" fill="#7f1d1d" fontSize="5" fontWeight="800" letterSpacing="0.2">SAH &amp; TERVERIFIKASI</text>
+                      </svg>
+                    )}
+                    <p className="text-[11px] font-bold border-t border-slate-400 pt-1 mt-1">{getBendaharaRtNama()}</p>
+                  </div>
                 </div>
-              </div>
-              <p className="text-[9px] text-slate-400 mt-3 leading-relaxed text-center">Kuitansi ini sah dan diterbitkan otomatis oleh sistem tanpa memerlukan cap basah.</p>
+                <p className="text-[9px] text-slate-400 mt-3 leading-relaxed text-center">Kuitansi ini sah dan diterbitkan otomatis oleh sistem tanpa memerlukan cap basah.</p>
 
-              <button onClick={() => window.print && window.print()} className="w-full mt-5 bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-sans font-bold py-2.5 rounded-xl text-xs transition-transform duration-150 hover:scale-[1.01]">Unduh / Cetak Kuitansi</button>
+                <button onClick={() => window.print && window.print()} className="w-full mt-5 bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-sans font-bold py-2.5 rounded-xl text-xs transition-transform duration-150 hover:scale-[1.01]">Unduh / Cetak Kuitansi</button>
+              </div>
             </div>
           </div>
         </div>
