@@ -157,8 +157,105 @@ function SparklineTren({ data, className = '' }) {
 }
 
 // =====================================================================
-// HOOK: TREN PENGUNJUNG HARIAN/MINGGUAN
+// KOMPONEN: PIE CHART DISTRIBUSI BLOK (INTERAKTIF, KLIK UNTUK ZOOM SLICE)
 // -----------------------------------------------------------
+// Dipakai di "Informasi Warga" (Admin) -> "Distribusi Warga per Blok",
+// menggambar pie/donut chart murni pakai SVG (tanpa library luar) dari
+// data [{ label, value, colorFrom, colorTo }]. Saat salah satu slice
+// diklik/tap, slice tsb otomatis "meletup"/zoom keluar sedikit dari pusat
+// lingkaran (exploded slice) & sedikit membesar, mirip pie chart di
+// dashboard modern - klik lagi pada slice yang sama untuk kembali normal.
+// =====================================================================
+function PieChartBlok({ data, size = 220 }) {
+  const [activeIdx, setActiveIdx] = useState(null);
+  const total = data.reduce((acc, d) => acc + d.value, 0);
+  if (total <= 0) return null;
+
+  const cx = size / 2, cy = size / 2;
+  const rBase = size / 2 - 14; // radius normal
+  const rZoom = rBase + 10; // radius saat slice sedang di-zoom/exploded
+
+  const toXY = (angleDeg, r) => {
+    const rad = ((angleDeg - 90) * Math.PI) / 180;
+    return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+  };
+
+  let cursor = 0;
+  const slices = data.map((d, i) => {
+    const persen = d.value / total;
+    const startAngle = cursor * 360;
+    const endAngle = (cursor + persen) * 360;
+    cursor += persen;
+    return { ...d, i, persen, startAngle, endAngle };
+  });
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} className="overflow-visible">
+        {slices.map((s) => {
+          const isActive = activeIdx === s.i;
+          const r = isActive ? rZoom : rBase;
+          const midAngle = (s.startAngle + s.endAngle) / 2;
+          // Offset "meletup keluar dari pusat" saat slice aktif/di-zoom
+          const explodeOffset = isActive ? 10 : 0;
+          const [ox, oy] = toXY(midAngle, explodeOffset);
+          const [x1, y1] = [toXY(s.startAngle, r)[0] - (cx - ox), toXY(s.startAngle, r)[1] - (cy - oy)];
+          const [x2, y2] = [toXY(s.endAngle, r)[0] - (cx - ox), toXY(s.endAngle, r)[1] - (cy - oy)];
+          const largeArc = s.endAngle - s.startAngle > 180 ? 1 : 0;
+          const pathD = `M${ox},${oy} L${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r} 0 ${largeArc} 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z`;
+          const gradId = `pieGrad-${s.i}`;
+          return (
+            <g
+              key={s.i}
+              role="button"
+              tabIndex={0}
+              onClick={() => setActiveIdx(activeIdx === s.i ? null : s.i)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveIdx(activeIdx === s.i ? null : s.i); } }}
+              className="cursor-pointer transition-transform duration-200"
+              style={{ transformOrigin: `${cx}px ${cy}px` }}
+            >
+              <title>{`${s.label}: ${s.value} KK (${Math.round(s.persen * 100)}%)`}</title>
+              <defs>
+                <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor={s.colorFrom} />
+                  <stop offset="100%" stopColor={s.colorTo} />
+                </linearGradient>
+              </defs>
+              <path
+                d={pathD}
+                fill={`url(#${gradId})`}
+                stroke="#fff"
+                strokeWidth={isActive ? 2.5 : 1.5}
+                opacity={activeIdx !== null && !isActive ? 0.45 : 1}
+                className="transition-all duration-200"
+              />
+            </g>
+          );
+        })}
+        {/* Lubang tengah (gaya donut chart) + total di tengah */}
+        <circle cx={cx} cy={cy} r={rBase * 0.52} fill="#fff" />
+        <text x={cx} y={cy - 4} textAnchor="middle" className="fill-slate-900" style={{ fontSize: 15, fontWeight: 900 }}>{total}</text>
+        <text x={cx} y={cy + 12} textAnchor="middle" className="fill-slate-400" style={{ fontSize: 8, fontWeight: 800, letterSpacing: 0.5 }}>TOTAL KK</text>
+      </svg>
+      {/* LEGENDA - klik legenda juga bisa memicu zoom slice yang sama */}
+      <div className="flex flex-wrap justify-center gap-1.5 max-w-xs">
+        {slices.map((s) => (
+          <button
+            type="button"
+            key={s.i}
+            onClick={() => setActiveIdx(activeIdx === s.i ? null : s.i)}
+            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold transition-colors ${activeIdx === s.i ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+          >
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: `linear-gradient(135deg, ${s.colorFrom}, ${s.colorTo})` }}></span>
+            {s.label} ({Math.round(s.persen * 100)}%)
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
 // Menyimpan "titik awal" (baseline) angka total pengunjung di tiap
 // tanggal ke localStorage perangkat, lalu menghitung selisihnya untuk
 // mendapatkan estimasi: Hari Ini, Kemarin, Minggu Ini & Minggu Lalu,
@@ -4792,7 +4889,9 @@ export default function IuranWargaRTApp() {
               // Distribusi Warga per Blok: SEMUA blok ditampilkan baik untuk Admin
               // maupun akun user (warga) - user hanya tidak melihat tombol "Lihat
               // Rincian" & progress bar (dua fitur itu tetap khusus Admin).
-              const perBlok = perBlokSemua;
+              // Diurutkan otomatis PARETO: dari jumlah KK TERTINGGI ke TERENDAH,
+              // supaya blok paling padat langsung terlihat di paling atas.
+              const perBlok = [...perBlokSemua].sort((a, b) => b.jumlahKK - a.jumlahKK);
               // Warga Terbaru & Warga Keluar: SEMUA data RT ditampilkan baik untuk
               // Admin maupun akun user (warga) - supaya info warga masuk/keluar
               // otomatis konek & terlihat oleh seluruh warga, bukan hanya blok sendiri.
@@ -4889,6 +4988,26 @@ export default function IuranWargaRTApp() {
                     <h4 className="text-xs font-extrabold text-slate-900 uppercase mb-3">
                       Distribusi Warga per Blok
                     </h4>
+
+                    {/* PIE CHART PEMETAAN WARGA BY BLOK (KHUSUS ADMIN) - klik salah
+                        satu bagian/legenda untuk otomatis "zoom" (exploded slice). */}
+                    {role === 'admin' && (() => {
+                      const gradientColor = (i, n) => {
+                        const hue = Math.round((360 / Math.max(n, 1)) * i);
+                        return { from: `hsl(${hue}, 68%, 42%)`, to: `hsl(${hue}, 68%, 58%)` };
+                      };
+                      const blokDenganWarga = perBlok.filter(k => k.jumlahKK > 0);
+                      const pieDataBlok = blokDenganWarga.map((k, idx) => {
+                        const { from, to } = gradientColor(idx, blokDenganWarga.length);
+                        return { label: k.nama, value: k.jumlahKK, colorFrom: from, colorTo: to };
+                      });
+                      return pieDataBlok.length > 0 ? (
+                        <div className="flex justify-center mb-5 pb-5 border-b">
+                          <PieChartBlok data={pieDataBlok} />
+                        </div>
+                      ) : null;
+                    })()}
+
                     <div className="space-y-3">
                       {perBlok.map(k => {
                         const persen = totalKK > 0 ? Math.round((k.jumlahKK / totalKK) * 100) : 0;
@@ -4902,6 +5021,7 @@ export default function IuranWargaRTApp() {
                               <span className="flex items-center gap-2">
                                 <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-lg font-black">{k.jumlahKK} KK</span>
                                 <span className="bg-sky-50 text-sky-700 px-2 py-0.5 rounded-lg font-black">{k.jumlahJiwa} Jiwa</span>
+                                <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-lg font-black">{persen}%</span>
                                 {role === 'admin' && (
                                   <button
                                     type="button"
@@ -5824,12 +5944,20 @@ export default function IuranWargaRTApp() {
                       const anggotaKelompok = anggotaSemuaUntukTampil.filter(m => m.kelompok === k.nama);
                       const rekapUsia = getRekapKategoriUsia(anggotaKelompok);
                       const totalJiwa = anggotaKelompok.length + anggotaKelompok.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
+                      // BLOK RUMAH MU: khusus akun user (bukan admin), blok yang SAMA
+                      // dengan blok tempat tinggalnya sendiri (activeUserSession.kelompok)
+                      // ditandai beda - gradasi biru navy + label "Blok Rumah Mu", supaya
+                      // langsung kelihatan tanpa harus mencari-cari di antara blok lain.
+                      const isBlokSaya = role !== 'admin' && !isSimulatedSession && activeUserSession && k.nama === activeUserSession.kelompok;
                       return (
-                        <div key={k.id} className="border p-4 rounded-xl bg-slate-50 space-y-2">
-                          <div className="flex justify-between items-start font-bold border-b pb-1.5 text-emerald-950">
+                        <div key={k.id} className={`p-4 rounded-xl space-y-2 transition-all duration-200 ${isBlokSaya ? 'border border-blue-900 bg-gradient-to-br from-blue-950 via-blue-900 to-indigo-900 text-white shadow-lg shadow-blue-900/30 ring-2 ring-blue-400/40' : 'border bg-slate-50'}`}>
+                          {isBlokSaya && (
+                            <span className="inline-flex items-center gap-1 bg-amber-400 text-blue-950 text-[9px] font-black uppercase tracking-wide px-2 py-1 rounded-lg mb-1">🏠 Blok Rumah Mu</span>
+                          )}
+                          <div className={`flex justify-between items-start font-bold border-b pb-1.5 ${isBlokSaya ? 'border-blue-800/60 text-white' : 'text-emerald-950'}`}>
                             <div>
                               <span className="block">{k.nama}</span>
-                              <span className="block text-[10px] font-mono text-slate-400 font-normal">{k.jenis} • Kapasitas {k.kapasitas} orang</span>
+                              <span className={`block text-[10px] font-mono font-normal ${isBlokSaya ? 'text-blue-200' : 'text-slate-400'}`}>{k.jenis} • Kapasitas {k.kapasitas} orang</span>
                             </div>
                             <span className={`px-2 py-0.5 rounded text-[10px] shrink-0 ${k.status === 'Progress' ? 'bg-emerald-600 text-white' : 'bg-slate-400 text-white'}`}>{k.status}</span>
                           </div>
@@ -5849,8 +5977,8 @@ export default function IuranWargaRTApp() {
                             </ul>
                           )}
                           {/* KATEGORI USIA OTOMATIS (dihitung dari seluruh anggota keluarga di blok ini) */}
-                          <div className="pt-2 border-t">
-                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wide block mb-1.5">Rekap Usia Otomatis</span>
+                          <div className={`pt-2 border-t ${isBlokSaya ? 'border-blue-800/60' : ''}`}>
+                            <span className={`text-[9px] font-black uppercase tracking-wide block mb-1.5 ${isBlokSaya ? 'text-blue-200' : 'text-slate-400'}`}>Rekap Usia Otomatis</span>
                             <div className="grid grid-cols-1 gap-1">
                               {KATEGORI_USIA_LIST.map(kat => (
                                 <div key={kat} className="flex items-center justify-between bg-white border rounded-lg px-2 py-1 text-[10px]">
