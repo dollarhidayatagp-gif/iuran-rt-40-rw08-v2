@@ -166,7 +166,7 @@ function SparklineTren({ data, className = '' }) {
 // lingkaran (exploded slice) & sedikit membesar, mirip pie chart di
 // dashboard modern - klik lagi pada slice yang sama untuk kembali normal.
 // =====================================================================
-function PieChartBlok({ data, size = 220 }) {
+function PieChartBlok({ data, size = 220, unitLabel = 'KK' }) {
   const [activeIdx, setActiveIdx] = useState(null);
   const total = data.reduce((acc, d) => acc + d.value, 0);
   if (total <= 0) return null;
@@ -214,7 +214,7 @@ function PieChartBlok({ data, size = 220 }) {
               className="cursor-pointer transition-transform duration-200"
               style={{ transformOrigin: `${cx}px ${cy}px` }}
             >
-              <title>{`${s.label}: ${s.value} KK (${Math.round(s.persen * 100)}%)`}</title>
+              <title>{`${s.label}: ${s.value} ${unitLabel} (${Math.round(s.persen * 100)}%)`}</title>
               <defs>
                 <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
                   <stop offset="0%" stopColor={s.colorFrom} />
@@ -235,7 +235,7 @@ function PieChartBlok({ data, size = 220 }) {
         {/* Lubang tengah (gaya donut chart) + total di tengah */}
         <circle cx={cx} cy={cy} r={rBase * 0.52} fill="#fff" />
         <text x={cx} y={cy - 4} textAnchor="middle" className="fill-slate-900" style={{ fontSize: 15, fontWeight: 900 }}>{total}</text>
-        <text x={cx} y={cy + 12} textAnchor="middle" className="fill-slate-400" style={{ fontSize: 8, fontWeight: 800, letterSpacing: 0.5 }}>TOTAL KK</text>
+        <text x={cx} y={cy + 12} textAnchor="middle" className="fill-slate-400" style={{ fontSize: 8, fontWeight: 800, letterSpacing: 0.5 }}>TOTAL {unitLabel.toUpperCase()}</text>
       </svg>
       {/* LEGENDA - klik legenda juga bisa memicu zoom slice yang sama */}
       <div className="flex flex-wrap justify-center gap-1.5 max-w-xs">
@@ -1709,6 +1709,11 @@ export default function IuranWargaRTApp() {
   // blok tersebut (format sama seperti tabel "Anggota Keluarga" akun user).
   // null = belum ada blok yang dibuka rinciannya.
   const [rincianBlokTerbuka, setRincianBlokTerbuka] = useState(null);
+  // MODE PERSENTASE "Distribusi Warga per Blok" (Informasi Warga) - warga
+  // bisa toggle apakah persentase yang ditampilkan (di badge & pie chart)
+  // dihitung berdasarkan jumlah KK (Kepala Keluarga) atau jumlah Jiwa
+  // (seluruh anggota keluarga termasuk KK). Default: 'kk'.
+  const [modePersenBlok, setModePersenBlok] = useState('kk'); // 'kk' | 'jiwa'
   // NAMA BLOK YANG SEDANG DIBUKA RINCIANNYA khusus untuk daftar warga
   // "Pasif/Keluar" per blok (bagian terpisah dari rincianBlokTerbuka di
   // atas) - dipakai di section "Distribusi Warga Pasif / Keluar per Blok".
@@ -4985,32 +4990,60 @@ export default function IuranWargaRTApp() {
                       blok tempat tinggalnya sendiri, otomatis terhubung dengan
                       data Anggota (Google Sheet) tanpa perlu input manual. */}
                   <div className="bg-white p-5 rounded-2xl border shadow-xs">
-                    <h4 className="text-xs font-extrabold text-slate-900 uppercase mb-3">
-                      Distribusi Warga per Blok
-                    </h4>
+                    <div className="flex justify-between items-start flex-wrap gap-2 mb-1">
+                      <h4 className="text-xs font-extrabold text-slate-900 uppercase">
+                        Distribusi Warga per Blok
+                      </h4>
+                      {/* TOGGLE DASAR PERSENTASE: KK (Kepala Keluarga) atau Jiwa (seluruh
+                          anggota keluarga). Tersedia untuk Admin maupun akun user. */}
+                      <div className="flex items-center bg-slate-100 rounded-lg p-0.5 text-[10px] font-black">
+                        <button
+                          type="button"
+                          onClick={() => setModePersenBlok('kk')}
+                          className={`px-2.5 py-1 rounded-md transition-colors ${modePersenBlok === 'kk' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}
+                        >
+                          Berdasarkan KK
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setModePersenBlok('jiwa')}
+                          className={`px-2.5 py-1 rounded-md transition-colors ${modePersenBlok === 'jiwa' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}
+                        >
+                          Berdasarkan Jiwa
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mb-3">
+                      *Persentase di bawah ini dihitung berdasarkan {modePersenBlok === 'kk' ? <><strong className="text-slate-600">jumlah KK (Kepala Keluarga)</strong> tiap blok dibagi total {totalKK} KK se-RT</> : <><strong className="text-slate-600">jumlah Jiwa</strong> (KK + seluruh anggota keluarga) tiap blok dibagi total {totalJiwa} Jiwa se-RT</>}.
+                    </p>
 
-                    {/* PIE CHART PEMETAAN WARGA BY BLOK (KHUSUS ADMIN) - klik salah
-                        satu bagian/legenda untuk otomatis "zoom" (exploded slice). */}
-                    {role === 'admin' && (() => {
+                    {/* PIE CHART PEMETAAN WARGA BY BLOK (ADMIN & USER) - klik salah
+                        satu bagian/legenda untuk otomatis "zoom" (exploded slice).
+                        Mengikuti toggle KK/Jiwa di atas. Fitur "Lihat Rincian" tetap
+                        khusus Admin, TIDAK ditampilkan untuk akun user. */}
+                    {(() => {
                       const gradientColor = (i, n) => {
                         const hue = Math.round((360 / Math.max(n, 1)) * i);
                         return { from: `hsl(${hue}, 68%, 42%)`, to: `hsl(${hue}, 68%, 58%)` };
                       };
-                      const blokDenganWarga = perBlok.filter(k => k.jumlahKK > 0);
+                      const nilaiBlok = (k) => (modePersenBlok === 'kk' ? k.jumlahKK : k.jumlahJiwa);
+                      const blokDenganWarga = perBlok.filter(k => nilaiBlok(k) > 0);
                       const pieDataBlok = blokDenganWarga.map((k, idx) => {
                         const { from, to } = gradientColor(idx, blokDenganWarga.length);
-                        return { label: k.nama, value: k.jumlahKK, colorFrom: from, colorTo: to };
+                        return { label: k.nama, value: nilaiBlok(k), colorFrom: from, colorTo: to };
                       });
                       return pieDataBlok.length > 0 ? (
                         <div className="flex justify-center mb-5 pb-5 border-b">
-                          <PieChartBlok data={pieDataBlok} />
+                          <PieChartBlok data={pieDataBlok} unitLabel={modePersenBlok === 'kk' ? 'KK' : 'Jiwa'} />
                         </div>
                       ) : null;
                     })()}
 
                     <div className="space-y-3">
                       {perBlok.map(k => {
-                        const persen = totalKK > 0 ? Math.round((k.jumlahKK / totalKK) * 100) : 0;
+                        const persenKK = totalKK > 0 ? Math.round((k.jumlahKK / totalKK) * 100) : 0;
+                        const persenJiwa = totalJiwa > 0 ? Math.round((k.jumlahJiwa / totalJiwa) * 100) : 0;
+                        const persen = modePersenBlok === 'kk' ? persenKK : persenJiwa;
                         const rincianTerbuka = rincianBlokTerbuka === k.nama;
                         // Daftar KK & anggota keluarga di blok ini (khusus untuk rincian admin)
                         const kkDiBlokIni = role === 'admin' ? dataWarga.filter(m => m.kelompok === k.nama) : [];
@@ -5021,7 +5054,7 @@ export default function IuranWargaRTApp() {
                               <span className="flex items-center gap-2">
                                 <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-lg font-black">{k.jumlahKK} KK</span>
                                 <span className="bg-sky-50 text-sky-700 px-2 py-0.5 rounded-lg font-black">{k.jumlahJiwa} Jiwa</span>
-                                <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-lg font-black">{persen}%</span>
+                                <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-lg font-black" title={`${persen}% berdasarkan ${modePersenBlok === 'kk' ? 'KK' : 'Jiwa'}`}>{persen}%</span>
                                 {role === 'admin' && (
                                   <button
                                     type="button"
@@ -5957,7 +5990,7 @@ export default function IuranWargaRTApp() {
                           <div className={`flex justify-between items-start font-bold border-b pb-1.5 ${isBlokSaya ? 'border-blue-800/60 text-white' : 'text-emerald-950'}`}>
                             <div>
                               <span className="block">{k.nama}</span>
-                              <span className={`block text-[10px] font-mono font-normal ${isBlokSaya ? 'text-blue-200' : 'text-slate-400'}`}>{k.jenis} • Kapasitas {k.kapasitas} orang</span>
+                              <span className={`block text-[10px] font-mono font-normal ${isBlokSaya ? 'text-blue-200' : 'text-slate-400'}`}>{isBlokSaya ? 'Info Warga Blok Rumah Mu Sekarang' : `${k.jenis} • Kapasitas ${k.kapasitas} orang`}</span>
                             </div>
                             <span className={`px-2 py-0.5 rounded text-[10px] shrink-0 ${k.status === 'Progress' ? 'bg-emerald-600 text-white' : 'bg-slate-400 text-white'}`}>{k.status}</span>
                           </div>
