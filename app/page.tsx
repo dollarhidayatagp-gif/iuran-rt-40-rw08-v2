@@ -208,7 +208,12 @@ function useTrenPengunjung(totalPengunjung) {
 
       const hasilHariIni = Math.max(0, totalPengunjung - baseHariIni);
       const hasilKemarin = Math.max(0, baseHariIni - baseKemarin);
-      const hasilMingguIni = Math.max(0, totalPengunjung - baseSeninIni);
+      // PERBAIKAN: "Minggu Ini" sengaja dibuat = Hari Ini + Kemarin (bukan
+      // dihitung dari baseline hari Senin secara terpisah) supaya angka yang
+      // ditampilkan di kartu selalu "nyambung"/konsisten secara matematis
+      // dengan 2 angka di sebelahnya (Hari Ini & Kemarin), tidak membingungkan
+      // warga yang membandingkan langsung angkanya di kartu Jumlah Pengunjung.
+      const hasilMingguIni = hasilHariIni + hasilKemarin;
       const hasilMingguLalu = Math.max(0, baseSeninIni - baseSeninLalu);
 
       const spark = [];
@@ -947,6 +952,10 @@ export default function IuranWargaRTApp() {
   const [adminSortNamaDir, setAdminSortNamaDir] = useState(null); // null | 'asc' | 'desc'
   const [adminFilterNomorPengajuan, setAdminFilterNomorPengajuan] = useState('Semua');
   const [expandedRekapKelompokId, setExpandedRekapKelompokId] = useState(null);
+  // expandedRekapAnggotaId: id anggota yang sedang dibuka "Rincian"-nya di
+  // tabel "Rekap Per Anggota (Monitoring)" - menampilkan histori 12 bulan
+  // periode berjalan yang masih belum lunas/open untuk anggota tsb.
+  const [expandedRekapAnggotaId, setExpandedRekapAnggotaId] = useState(null);
   // FILTER BULAN DI DASHBOARD UTAMA (ADMIN) - 'Semua' (default) = kartu Total
   // Kas Global & Sisa Tagihan tetap tampil akumulasi sepanjang periode
   // berjalan seperti biasa. Kalau admin pilih bulan tertentu (mis. id=1 utk
@@ -1900,6 +1909,11 @@ export default function IuranWargaRTApp() {
   // ==========================================
   const [formLogin, setFormLogin] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
+  // isLoggingIn: dipakai untuk menampilkan teks "Memuat data dari server, mohon
+  // tunggu..." di form login Web Utama SELAMA proses login sedang menghubungi
+  // server (Google Sheets). Mengantisipasi warga mengira web "gagal/error"
+  // padahal sebenarnya cuma masih menunggu respons server (koneksi lambat dsb).
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // ==========================================
   // LOGIN ADMIN/PANITIA (TERPISAH DARI LOGIN WARGA)
@@ -2068,6 +2082,12 @@ export default function IuranWargaRTApp() {
   const jumlahNotifBelumDibaca = notifikasiSaya.filter(n => !n.dibaca).length;
 
 
+  // Bulan yang SEDANG BERJALAN dalam periode 12 bulan (DAFTAR_BULAN), dicari
+  // berdasarkan BULAN_BERJALAN (nomor bulan kalender 1-12, lihat definisi di
+  // atas). Dipakai supaya status "Sudah Bayar"/"Belum Bayar" per anggota HANYA
+  // mencerminkan bulan berjalan saat ini, bukan status lunas target 1 tahun.
+  const bulanBerjalanObj = DAFTAR_BULAN.find(b => b.bulanKalender === BULAN_BERJALAN) || DAFTAR_BULAN[0];
+
   // ==========================================
   // REKAPAN PER NAMA UNTUK MONITORING ADMIN
   // ==========================================
@@ -2082,7 +2102,38 @@ export default function IuranWargaRTApp() {
     const sisa = m.pengurus ? 0 : Math.max(0, m.target - dibayar);
     const persen = m.pengurus ? 100 : Math.min(100, Math.round((dibayar / m.target) * 100));
     const bulanLunas = rows.filter(r => r.status === 'LUNAS').length;
-    return { ...m, dibayar, pending, sisa, persen, bulanLunas };
+
+    // STATUS BULAN BERJALAN: HANYA melihat status pembayaran di bulan yang
+    // sedang berjalan saat ini (mis. Juli), BUKAN status lunas target 1 tahun.
+    // Jadi kalau bulan berjalan Juli sudah dibayar -> "Sudah Bayar", walau
+    // total setahun belum lunas semua. Sebaliknya kalau sudah masuk Agustus
+    // & belum ada pembayaran Agustus -> "Belum Bayar" (bukan ikut menghitung
+    // tunggakan bulan-bulan lama).
+    const rowBulanIni = rows.find(r => r.bulanNama === bulanBerjalanObj.nama);
+    const statusBulanIni = m.pengurus
+      ? 'Bebas Iuran'
+      : rowBulanIni
+        ? (rowBulanIni.status === 'LUNAS' ? 'Sudah Bayar' : 'Menunggu Verifikasi')
+        : 'Belum Bayar';
+
+    // RIWAYAT BELUM LUNAS/OPEN: daftar bulan (dari 12 bulan periode berjalan)
+    // yang statusnya MASIH belum lunas (belum ada pembayaran ATAU masih
+    // menunggu verifikasi) - dipakai saat admin klik "Rincian" di tabel
+    // Rekap Per Anggota (Monitoring).
+    const riwayatBelumLunas = m.pengurus ? [] : DAFTAR_BULAN
+      .map(bln => {
+        const row = rows.find(r => r.bulanNama === bln.nama);
+        return {
+          bulanId: bln.id,
+          bulanNama: bln.nama,
+          tahun: periodeTahun + bln.tahunOffset,
+          nominal: row ? row.nominal : IURAN_BULANAN,
+          status: row ? row.status : 'BELUM BAYAR',
+        };
+      })
+      .filter(r => r.status !== 'LUNAS');
+
+    return { ...m, dibayar, pending, sisa, persen, bulanLunas, statusBulanIni, riwayatBelumLunas };
   });
 
   // ==========================================
@@ -3238,6 +3289,7 @@ export default function IuranWargaRTApp() {
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
+    setIsLoggingIn(true);
 
     // ==========================================
     // LOGIN SUPER ADMIN - SATU FORM DENGAN LOGIN WARGA (WEB UTAMA)
@@ -3262,6 +3314,7 @@ export default function IuranWargaRTApp() {
       setActiveMenu('dashboard');
       setFormLogin({ username: '', password: '' });
       showToast('Selamat datang, Admin/Bendahara! Anda login dengan akses Admin (penuh).');
+      setIsLoggingIn(false);
       return;
     }
 
@@ -3276,6 +3329,7 @@ export default function IuranWargaRTApp() {
     // ==========================================
     if (!cmsTeks.appsScriptUrl) {
       setLoginError('Google Sheets belum tersambung, hubungi pengurus RT.');
+      setIsLoggingIn(false);
       return;
     }
 
@@ -3314,6 +3368,8 @@ export default function IuranWargaRTApp() {
       showToast(`Selamat datang, ${found.nama}!${found.akses === 'admin' ? ' Anda login dengan akses Admin (penuh).' : ''}`);
     } catch (err) {
       setLoginError('Gagal menghubungi server, cek koneksi internet Anda.');
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -4368,8 +4424,9 @@ export default function IuranWargaRTApp() {
                 <form onSubmit={handleLogin} className="space-y-3 text-xs font-semibold">
                   <div><label className="block mb-1 text-slate-600">Username</label><input type="text" required placeholder="hidayat123" value={formLogin.username} onChange={(e) => setFormLogin({...formLogin, username: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                   <div><label className="block mb-1 text-slate-600">Password</label><input type="password" required placeholder="••••••••" value={formLogin.password} onChange={(e) => setFormLogin({...formLogin, password: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
+                  {isLoggingIn && <p className="text-[11px] font-bold text-amber-600 flex items-center gap-1.5"><span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></span>Memuat data dari server, mohon tunggu...</p>}
                   {loginError && <p className="text-[11px] font-bold text-rose-600">{loginError}</p>}
-                  <button type="submit" className="w-full bg-emerald-700 text-white font-bold p-2.5 rounded-xl transition-transform duration-150 hover:scale-[1.01]">🔑 Masuk ke Akun Saya</button>
+                  <button type="submit" disabled={isLoggingIn} className="w-full bg-emerald-700 text-white font-bold p-2.5 rounded-xl transition-transform duration-150 hover:scale-[1.01] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100">{isLoggingIn ? 'Memuat...' : '🔑 Masuk ke Akun Saya'}</button>
                 </form>
               </div>
 
@@ -5532,17 +5589,22 @@ export default function IuranWargaRTApp() {
                                       </tr>
                                     </thead>
                                     <tbody>
+                                      {/* Kolom "Status" di sini SENGAJA hanya mencerminkan status pembayaran
+                                          di BULAN BERJALAN saat ini (mis. Juli) - bukan status lunas target
+                                          1 tahun (m.sisa). Jadi kalau bulan berjalan sudah dibayar -> "Sudah
+                                          Bayar" walau tunggakan bulan-bulan lama masih ada; sebaliknya begitu
+                                          masuk bulan berikutnya & belum bayar -> otomatis balik "Belum Bayar". */}
                                       {k.anggotaKelompok.map(m => (
-                                        <tr key={m.id} className={`border-b last:border-0 ${m.sisa > 0 ? 'bg-rose-50/60' : ''}`}>
+                                        <tr key={m.id} className={`border-b last:border-0 ${m.statusBulanIni === 'Belum Bayar' ? 'bg-rose-50/60' : ''}`}>
                                           <td className="py-1.5 pr-2 font-black text-slate-900">{m.nama}</td>
                                           <td className="py-1.5 pr-2 text-slate-500">Rp {m.target.toLocaleString('id-ID')}</td>
                                           <td className="py-1.5 pr-2 text-emerald-700">Rp {m.dibayar.toLocaleString('id-ID')}</td>
                                           <td className="py-1.5 pr-2 text-rose-500">Rp {m.sisa.toLocaleString('id-ID')}</td>
                                           <td className="py-1.5 pr-2">
-                                            {m.sisa === 0 ? (
-                                              <span className="text-emerald-700 font-black">Lunas</span>
-                                            ) : m.pending > 0 ? (
-                                              <span className="text-amber-600 font-black">Ada Menunggu Verifikasi</span>
+                                            {m.statusBulanIni === 'Sudah Bayar' ? (
+                                              <span className="text-emerald-700 font-black">Sudah Bayar</span>
+                                            ) : m.statusBulanIni === 'Menunggu Verifikasi' ? (
+                                              <span className="text-amber-600 font-black">Menunggu Verifikasi</span>
                                             ) : (
                                               <span className="text-rose-600 font-black">Belum Bayar</span>
                                             )}
@@ -5643,11 +5705,13 @@ export default function IuranWargaRTApp() {
                               <th className="py-2 pr-2">Dibayar</th>
                               <th className="py-2 pr-2">Sisa</th>
                               <th className="py-2 pr-2">Progress</th>
+                              <th className="py-2 pr-2">Aksi</th>
                             </tr>
                           </thead>
                           <tbody>
                             {rekapPerAnggota.map(m => (
-                              <tr key={m.id} className="border-b last:border-0 hover:bg-slate-50 transition-colors">
+                              <React.Fragment key={m.id}>
+                              <tr className="border-b last:border-0 hover:bg-slate-50 transition-colors">
                                 <td className="py-2.5 pr-2 text-slate-900 font-black">{m.nama}</td>
                                 <td className="py-2.5 pr-2 text-emerald-700 font-bold">{m.nomorRumah || m.nama}</td>
                                 <td className="py-2.5 pr-2 text-slate-500">{m.kelompok}</td>
@@ -5668,10 +5732,59 @@ export default function IuranWargaRTApp() {
                                     <span className="text-slate-500">{m.persen}%</span>
                                   </div>
                                 </td>
+                                <td className="py-2.5 pr-2">
+                                  {m.pengurus ? (
+                                    <span className="text-slate-300">—</span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => setExpandedRekapAnggotaId(expandedRekapAnggotaId === m.id ? null : m.id)}
+                                      className="text-emerald-700 font-bold text-[10px] underline underline-offset-2 whitespace-nowrap"
+                                    >
+                                      {expandedRekapAnggotaId === m.id ? 'Tutup Rincian' : 'Lihat Rincian'}
+                                    </button>
+                                  )}
+                                </td>
                               </tr>
+                              {expandedRekapAnggotaId === m.id && (
+                                <tr className="bg-slate-50/70 border-b">
+                                  <td colSpan={9} className="py-3 px-3">
+                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-2">Histori Belum Lunas/Open — {m.nama} (Periode {labelRentangPeriode})</p>
+                                    {m.riwayatBelumLunas.length === 0 ? (
+                                      <p className="text-[11px] text-emerald-700 font-bold italic">🎉 Semua 12 bulan periode ini sudah LUNAS, tidak ada tunggakan.</p>
+                                    ) : (
+                                      <table className="w-full text-[11px] font-semibold bg-white rounded-xl border overflow-hidden">
+                                        <thead>
+                                          <tr className="text-slate-400 uppercase text-[9px] text-left border-b bg-slate-100">
+                                            <th className="py-1.5 px-2">Bulan</th>
+                                            <th className="py-1.5 px-2">Nominal</th>
+                                            <th className="py-1.5 px-2">Status</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {m.riwayatBelumLunas.map(r => (
+                                            <tr key={r.bulanId} className="border-b last:border-0">
+                                              <td className="py-1.5 px-2 text-slate-800 font-bold">{r.bulanNama} {r.tahun}</td>
+                                              <td className="py-1.5 px-2 text-slate-600">Rp {r.nominal.toLocaleString('id-ID')}</td>
+                                              <td className="py-1.5 px-2">
+                                                {r.status === 'MENUNGGU VERIFIKASI' ? (
+                                                  <span className="text-amber-600 font-black">Menunggu Verifikasi</span>
+                                                ) : (
+                                                  <span className="text-rose-600 font-black">Belum Bayar / Open</span>
+                                                )}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    )}
+                                  </td>
+                                </tr>
+                              )}
+                              </React.Fragment>
                             ))}
                             {rekapPerAnggota.length === 0 && (
-                              <tr><td colSpan={8} className="py-4 text-center text-slate-400 italic">Belum ada data anggota.</td></tr>
+                              <tr><td colSpan={9} className="py-4 text-center text-slate-400 italic">Belum ada data anggota.</td></tr>
                             )}
                           </tbody>
                         </table>
