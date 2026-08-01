@@ -822,6 +822,18 @@ export default function IuranWargaRTApp() {
     { id: 'SIM-03', tanggal: '15 Jun 2026', kategori: 'Sosial', keterangan: 'Contoh: Santunan warga & kegiatan sosial (data simulasi)', nominal: 320000, kelompok: 'Simulasi', buktiUrl: null, buktiNamaFile: 'contoh_nota3.jpg', dicatatOleh: 'Ahmad (Bendahara)' },
   ];
 
+  // DATA DUMMY "BUKU KAS MASUK/KELUAR RT" KHUSUS SIMULASI - dipakai supaya
+  // tabel Buku Kas juga bisa ditampilkan di menu "Laporan Belanja Kas RT"
+  // versi akun Simulasi TANPA membocorkan angka kas RT yang ASLI. `saldoSetelah`
+  // sudah dihitung manual berurutan (sama seperti getRiwayatKasRtDenganSaldo).
+  const DUMMY_RIWAYAT_KAS_RT_SIMULASI = [
+    { id: 'SIM-KRT-01', tanggal: '01 Jun 2026', keterangan: 'Contoh: Saldo awal kas RT periode berjalan (data simulasi)', jenis: 'Masuk', nominal: 17500000, saldoSetelah: 17500000 },
+    { id: 'SIM-KRT-02', tanggal: '05 Jun 2026', keterangan: 'Contoh: Iuran bulanan warga terkumpul (data simulasi)', jenis: 'Masuk', nominal: 1350000, saldoSetelah: 18850000 },
+    { id: 'SIM-KRT-03', tanggal: '05 Jun 2026', keterangan: 'Contoh: Pembelian perlengkapan pos ronda (data simulasi)', jenis: 'Keluar', nominal: 850000, saldoSetelah: 18000000 },
+    { id: 'SIM-KRT-04', tanggal: '10 Jun 2026', keterangan: 'Contoh: Sewa mobil pick-up angkut sampah (data simulasi)', jenis: 'Keluar', nominal: 350000, saldoSetelah: 17650000 },
+  ];
+
+
   // ==========================================
   // PENANDA SESI SIMULASI vs SESI LOGIN ASLI
   // -----------------------------------------------------------
@@ -4352,14 +4364,17 @@ export default function IuranWargaRTApp() {
                 <div className="relative">
                   <h2 className="text-xl font-black text-amber-300 mb-2 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">{cmsTeks.judulBeranda}</h2>
                   <p className="text-[11px] text-emerald-300 font-bold uppercase tracking-widest mb-3 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">{cmsTeks.tagline}</p>
-                  <div className="text-xs text-slate-300 bg-slate-950/60 p-4 rounded-xl border border-slate-800 marquee-wrap">
+                  <div className="text-xs bg-blue-950/50 backdrop-blur-sm p-4 rounded-xl border border-blue-400/30 marquee-wrap">
                     {/* RUNNING TEXT (MARQUEE) - teks pengumuman berjalan terus-menerus dari
                         kanan ke kiri secara loop tanpa putus, supaya kotak pengumuman di
                         Beranda selalu terlihat "hidup" & lebih menarik perhatian warga.
                         Durasi animasi disesuaikan otomatis mengikuti panjang teks supaya
-                        kecepatan jalannya tetap terasa wajar walau teksnya pendek/panjang. */}
+                        kecepatan jalannya tetap terasa wajar walau teksnya pendek/panjang.
+                        Background navy transparan + teks warna menyala (amber/gold glow)
+                        supaya tetap senada dengan tema navy di sekitarnya tapi tetap
+                        menonjol/mudah dibaca. */}
                     <div
-                      className="marquee-track leading-relaxed"
+                      className="marquee-track leading-relaxed text-amber-300 font-bold drop-shadow-[0_0_6px_rgba(252,211,77,0.65)]"
                       style={{ animationDuration: `${Math.max(12, (cmsTeks.pengumuman || '').length * 0.09)}s` }}
                     >
                       <span>{cmsTeks.pengumuman}</span>
@@ -4390,7 +4405,7 @@ export default function IuranWargaRTApp() {
                     href={buatLinkWhatsapp(cmsTeks.infoKontak)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-2 inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] px-3 py-1.5 rounded-full transition-colors duration-200"
+                    className="mt-2 inline-flex items-center gap-1.5 bg-gradient-to-r from-blue-950 via-blue-900 to-blue-950 hover:from-blue-900 hover:via-blue-800 hover:to-blue-900 text-white font-bold text-[11px] px-3 py-1.5 rounded-full transition-colors duration-200"
                   >
                     💬 Chat via WhatsApp
                   </a>
@@ -4529,11 +4544,12 @@ export default function IuranWargaRTApp() {
                       <p className="text-slate-300 text-[9px] font-bold mt-0.5 uppercase tracking-wide">{tanggalSekarang} • WIB</p>
                     </div>
                     {/* RUNNING TEXT (MARQUEE) - menggantikan teks statis, berjalan terus
-                        menerus tanpa henti supaya kotak info selalu "hidup". */}
-                    <div className="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl py-2 px-3 flex items-center gap-2">
+                        menerus tanpa henti supaya kotak info selalu "hidup". Background
+                        navy transparan + teks warna menyala supaya senada tema navy. */}
+                    <div className="mt-2 bg-blue-950/50 backdrop-blur-sm border border-blue-400/30 rounded-xl py-2 px-3 flex items-center gap-2">
                       <span className="text-base shrink-0">🔔</span>
                       <div className="marquee-wrap flex-1 min-w-0">
-                        <div className="marquee-track text-emerald-800 text-[10px] font-black">
+                        <div className="marquee-track text-amber-300 text-[10px] font-black drop-shadow-[0_0_5px_rgba(252,211,77,0.65)]">
                           <span>Digitalisasi untuk kemudahan dan kecepatan informasi warga</span>
                           <span>Digitalisasi untuk kemudahan dan kecepatan informasi warga</span>
                         </div>
@@ -4702,16 +4718,16 @@ export default function IuranWargaRTApp() {
               </div>
 
               {/* INFO MOTIVASI KEBERSAMAAN WARGA (MENGISI RUANG KOSONG) */}
-              <div className="bg-emerald-900 text-white p-6 rounded-3xl border border-emerald-800 shadow-xs h-fit">
+              <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white p-6 rounded-3xl border border-blue-800 shadow-xs h-fit">
                 <h3 className="text-xs font-black text-amber-300 uppercase tracking-widest text-center mb-3">Kenapa Iuran Warga Penting?</h3>
                 <div className="space-y-4 text-xs">
-                  <div className="bg-emerald-950/60 rounded-xl p-3 border border-emerald-800">
-                    <p className="italic text-emerald-100 leading-relaxed">Iuran yang tertib membuat lingkungan lebih aman, bersih, dan nyaman untuk seluruh warga.</p>
+                  <div className="bg-blue-950/60 rounded-xl p-3 border border-blue-800">
+                    <p className="italic text-blue-100 leading-relaxed">Iuran yang tertib membuat lingkungan lebih aman, bersih, dan nyaman untuk seluruh warga.</p>
                   </div>
-                  <div className="bg-emerald-950/60 rounded-xl p-3 border border-emerald-800">
-                    <p className="italic text-emerald-100 leading-relaxed">Dana warga digunakan untuk keamanan (ronda), kebersihan lingkungan, dan kegiatan sosial bersama.</p>
+                  <div className="bg-blue-950/60 rounded-xl p-3 border border-blue-800">
+                    <p className="italic text-blue-100 leading-relaxed">Dana warga digunakan untuk keamanan (ronda), kebersihan lingkungan, dan kegiatan sosial bersama.</p>
                   </div>
-                  <p className="text-emerald-200 text-[10px] text-center leading-relaxed">Yuk bayar iuran tepat waktu, demi RT 40 RW 08 yang lebih baik bersama.</p>
+                  <p className="text-blue-200 text-[10px] text-center leading-relaxed">Yuk bayar iuran tepat waktu, demi RT 40 RW 08 yang lebih baik bersama.</p>
                 </div>
               </div>
 
@@ -4799,7 +4815,7 @@ export default function IuranWargaRTApp() {
 
           {/* TOP BAR KHUSUS MODE HP (HAMBURGER TOGGLE SIDEBAR) */}
           <div className="lg:hidden sticky top-0 z-30 w-full bg-gradient-to-r from-blue-950 via-blue-900 to-blue-950 text-white px-4 py-3 flex items-center gap-3 border-b border-blue-900/60 shadow-md">
-            <button onClick={() => setSidebarOpen(true)} aria-label="Buka menu" className="w-9 h-9 rounded-lg bg-blue-800/70 flex items-center justify-center text-lg shrink-0">☰</button>
+            <button onClick={() => { setSidebarOpen(true); window.scrollTo && window.scrollTo({ top: 0, behavior: 'smooth' }); }} aria-label="Buka menu" className="w-9 h-9 rounded-lg bg-blue-800/70 flex items-center justify-center text-lg shrink-0">☰</button>
             {cmsTeks.logoRT ? (
               <img loading="lazy" decoding="async" src={cmsTeks.logoRT} alt="Logo" className="w-8 h-8 rounded-lg object-contain bg-white shrink-0" onError={(e) => { e.target.style.display = 'none'; }} />
             ) : (
@@ -4846,7 +4862,13 @@ export default function IuranWargaRTApp() {
                 </span>
               </div>
 
-              <nav onClick={() => setSidebarOpen(false)} className="space-y-1 text-xs font-bold">
+              {/* AUTO-SCROLL KE ATAS: setiap kali warga/admin klik salah satu menu di
+                  sidebar ini, halaman otomatis di-scroll ke posisi paling atas -
+                  supaya tidak perlu scroll manual ke atas lagi untuk lihat konten
+                  halaman baru kalau sebelumnya posisi scroll sudah jauh ke bawah.
+                  Dipasang di <nav> (bukan di tiap tombol satu-satu) supaya otomatis
+                  berlaku untuk SEMUA tombol menu di dalamnya lewat event bubbling. */}
+              <nav onClick={() => { setSidebarOpen(false); window.scrollTo && window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="space-y-1 text-xs font-bold">
                 <button onClick={() => setActiveMenu('dashboard')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'dashboard' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Dashboard Utama</button>
                 <button onClick={() => setActiveMenu('laporan-sapi')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'laporan-sapi' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Rekap Blok Rumah</button>
                 <button onClick={() => setActiveMenu('informasi-warga')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'informasi-warga' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Informasi Warga</button>
@@ -5383,12 +5405,10 @@ export default function IuranWargaRTApp() {
                 {/* USER INTERFACE VIEW */}
                 {role === 'user' && (
                   <div className="space-y-6 anim-fade">
-                    {isSimulatedSession && (
-                      <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-xs font-semibold leading-relaxed flex items-start gap-2">
-                        <span className="text-base leading-none">🧪</span>
-                        <span><strong>Ini hanya simulasi akun.</strong> Seluruh data di Dashboard ini adalah contoh tampilan, bukan data asli. Hanya akun warga yang sudah resmi terdaftar &amp; login yang akan terkoneksi dengan data real dari Google Sheets.</span>
-                      </div>
-                    )}
+                    {/* Catatan simulasi khusus halaman ini SUDAH DIHAPUS - sekarang
+                        cukup pakai 1 banner simulasi global di paling atas halaman
+                        (lihat isSimulatedSession di MAIN CONTAINER WORKSPACE) supaya
+                        tidak dobel/tumpuk 2 kotak kuning. */}
                     <div className="bg-white p-5 rounded-2xl border flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <h2 className="text-sm font-black text-slate-900">Assalamu'alaikum, {activeUserSession.nama} 👋</h2>
@@ -6036,7 +6056,13 @@ export default function IuranWargaRTApp() {
                       // dengan blok tempat tinggalnya sendiri (activeUserSession.kelompok)
                       // ditandai beda - gradasi biru navy + label "Blok Rumah Mu", supaya
                       // langsung kelihatan tanpa harus mencari-cari di antara blok lain.
-                      const isBlokSaya = role !== 'admin' && !isSimulatedSession && activeUserSession && k.nama === activeUserSession.kelompok;
+                      // BLOK RUMAH MU: berlaku untuk akun User ASLI maupun akun
+                      // SIMULASI (bukan hanya user asli lagi) - selama role bukan
+                      // admin & blok-nya sama dengan blok tempat tinggal akun yang
+                      // sedang aktif (activeUserSession.kelompok), kartu blok itu
+                      // ditandai beda (gradasi navy + label "Detail Informasi Blok
+                      // Anda") supaya langsung kelihatan tanpa harus dicari-cari.
+                      const isBlokSaya = role !== 'admin' && activeUserSession && k.nama === activeUserSession.kelompok;
                       return (
                         <div key={k.id} className={`p-4 rounded-xl space-y-2 transition-all duration-200 ${isBlokSaya ? 'border border-blue-900 bg-gradient-to-br from-blue-950 via-blue-900 to-indigo-900 text-white shadow-lg shadow-blue-900/30 ring-2 ring-blue-400/40' : 'border bg-slate-50'}`}>
                           {isBlokSaya && (
@@ -6045,7 +6071,7 @@ export default function IuranWargaRTApp() {
                           <div className={`flex justify-between items-start font-bold border-b pb-1.5 ${isBlokSaya ? 'border-blue-800/60 text-white' : 'text-emerald-950'}`}>
                             <div>
                               <span className="block">{k.nama}</span>
-                              <span className={`block text-[10px] font-mono font-normal ${isBlokSaya ? 'text-blue-200' : 'text-slate-400'}`}>{isBlokSaya ? 'Info Warga Blok Rumah Mu Sekarang' : `${k.jenis} • Kapasitas ${k.kapasitas} orang`}</span>
+                              <span className={`block text-[10px] font-mono font-normal ${isBlokSaya ? 'text-blue-200' : 'text-slate-400'}`}>{isBlokSaya ? 'Detail Informasi Blok Anda' : `${k.jenis} • Kapasitas ${k.kapasitas} orang`}</span>
                             </div>
                             <span className={`px-2 py-0.5 rounded text-[10px] shrink-0 ${k.status === 'Progress' ? 'bg-emerald-600 text-white' : 'bg-slate-400 text-white'}`}>{k.status}</span>
                           </div>
@@ -6180,11 +6206,9 @@ export default function IuranWargaRTApp() {
                 : (activeUserSession.anggotaKeluarga || []);
               return (
                 <div className="space-y-6">
-                  {isSimulatedSession && (
-                    <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-xs font-semibold leading-relaxed">
-                      🧪 <strong>Ini tampilan simulasi</strong> — data di bawah adalah contoh, bukan data keluarga yang sesungguhnya. Setelah Anda <strong>Login Akun Resmi</strong>, halaman ini menampilkan data keluarga ASLI dan Anda bisa menambah/menghapus anggota.
-                    </div>
-                  )}
+                  {/* Catatan simulasi khusus halaman ini SUDAH DIHAPUS - cukup pakai
+                      1 banner simulasi global di paling atas halaman, supaya tidak
+                      dobel/tumpuk 2 kotak kuning. */}
                   <div className="bg-white p-6 rounded-2xl border shadow-xs">
                     <div className="flex justify-between items-center flex-wrap gap-2 mb-4">
                       <div>
@@ -6365,37 +6389,89 @@ export default function IuranWargaRTApp() {
                 ? DUMMY_REALISASI_SIMULASI
                 : realisasiBelanja.filter(r => r.kelompok === 'Semua' || r.kelompok === activeUserSession.kelompok);
               const totalBelanja = dataTampil.reduce((acc, r) => acc + r.nominal, 0);
+              // BUKU KAS MASUK/KELUAR RT - sekarang juga ditampilkan di halaman
+              // warga/simulasi ini (sebelumnya cuma ada di Web Utama & Admin
+              // Panel), supaya warga bisa lihat riwayat kas RT lengkap dengan
+              // saldo berjalan, berdampingan dengan Realisasi Belanja.
+              const dataKasRt = isSimulatedSession ? DUMMY_RIWAYAT_KAS_RT_SIMULASI : getRiwayatKasRtDenganSaldo();
+              const saldoKasRtSaatIni = dataKasRt.length > 0 ? dataKasRt[dataKasRt.length - 1].saldoSetelah : 0;
               return (
                 <div className="space-y-4">
-                  {isSimulatedSession && (
-                    <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-xs font-semibold leading-relaxed">
-                      🧪 <strong>Ini tampilan simulasi</strong> — data di bawah adalah contoh, bukan realisasi belanja yang sesungguhnya. Setelah Anda <strong>Login Akun Resmi</strong> memakai username &amp; password asli, halaman ini otomatis menampilkan data ASLI yang diinput Bendahara dari Google Sheets.
-                    </div>
-                  )}
-                  <div className="bg-white p-6 rounded-2xl border shadow-xs">
-                    <div className="flex justify-between items-center flex-wrap gap-2 mb-4">
-                      <div>
-                        <h3 className="text-sm font-black text-slate-900">Laporan Belanja Kas RT</h3>
-                        <p className="text-[11px] text-slate-400 mt-0.5">Realisasi pengeluaran panitia/bendahara, lengkap dengan bukti foto struk/nota.</p>
-                      </div>
-                      <span className="text-[11px] font-black text-rose-600">Total Belanja: Rp {totalBelanja.toLocaleString('id-ID')}</span>
-                    </div>
-                    <div className="space-y-2 text-xs font-semibold">
-                      {dataTampil.map(r => (
-                        <div key={r.id} className="p-3 bg-slate-50 border rounded-xl flex justify-between items-center flex-wrap gap-2">
-                          <div className="min-w-0">
-                            <span className="inline-block text-[9px] font-black uppercase tracking-wide bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full mb-1">{r.kategori}</span>
-                            <p className="text-slate-900 font-bold">{r.keterangan}</p>
-                            <p className="text-slate-400">{formatTanggalLaporan(r.tanggal)} • Rp {r.nominal.toLocaleString('id-ID')} • Dicatat oleh {r.dicatatOleh}</p>
-                          </div>
-                          {r.buktiUrl ? (
-                            <button onClick={() => setPreviewLampiran({ judul: r.keterangan, url: r.buktiUrl, namaFile: r.buktiNamaFile, tipe: 'gambar' })} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded-lg shrink-0">📷 Lihat Bukti</button>
-                          ) : (
-                            <span className="text-slate-400 italic text-[10px] shrink-0">Bukti belum diunggah</span>
-                          )}
+                  {/* Catatan simulasi khusus halaman ini SUDAH DIHAPUS - cukup pakai
+                      1 banner simulasi global di paling atas halaman, supaya tidak
+                      dobel/tumpuk 2 kotak kuning (konsisten dengan halaman lain). */}
+                  {/* LAYOUT 2 KOLOM BERDAMPINGAN (di layar sempit otomatis tumpuk 1
+                      kolom): kiri = Realisasi/Laporan Belanja, kanan = Buku Kas
+                      Masuk/Keluar RT lengkap dengan saldo berjalan. */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                    <div className="bg-white p-6 rounded-2xl border shadow-xs">
+                      <div className="flex justify-between items-center flex-wrap gap-2 mb-4">
+                        <div>
+                          <h3 className="text-sm font-black text-slate-900">Laporan Belanja Kas RT</h3>
+                          <p className="text-[11px] text-slate-400 mt-0.5">Realisasi pengeluaran panitia/bendahara, lengkap dengan bukti foto struk/nota.</p>
                         </div>
-                      ))}
-                      {dataTampil.length === 0 && <p className="text-slate-400 italic">Belum ada realisasi belanja tercatat.</p>}
+                        <span className="text-[11px] font-black text-rose-600">Total Belanja: Rp {totalBelanja.toLocaleString('id-ID')}</span>
+                      </div>
+                      <div className="space-y-2 text-xs font-semibold">
+                        {dataTampil.map(r => (
+                          <div key={r.id} className="p-3 bg-slate-50 border rounded-xl flex justify-between items-center flex-wrap gap-2">
+                            <div className="min-w-0">
+                              <span className="inline-block text-[9px] font-black uppercase tracking-wide bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full mb-1">{r.kategori}</span>
+                              <p className="text-slate-900 font-bold">{r.keterangan}</p>
+                              <p className="text-slate-400">{formatTanggalLaporan(r.tanggal)} • Rp {r.nominal.toLocaleString('id-ID')} • Dicatat oleh {r.dicatatOleh}</p>
+                            </div>
+                            {r.buktiUrl ? (
+                              <button onClick={() => setPreviewLampiran({ judul: r.keterangan, url: r.buktiUrl, namaFile: r.buktiNamaFile, tipe: 'gambar' })} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded-lg shrink-0">📷 Lihat Bukti</button>
+                            ) : (
+                              <span className="text-slate-400 italic text-[10px] shrink-0">Bukti belum diunggah</span>
+                            )}
+                          </div>
+                        ))}
+                        {dataTampil.length === 0 && <p className="text-slate-400 italic">Belum ada realisasi belanja tercatat.</p>}
+                      </div>
+                    </div>
+
+                    {/* BUKU KAS MASUK/KELUAR RT (KOLOM KANAN) */}
+                    <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white p-6 rounded-2xl border border-blue-800 shadow-xs">
+                      <div className="flex justify-between items-center flex-wrap gap-2 mb-4">
+                        <div>
+                          <h3 className="text-sm font-black text-white">📒 Buku Kas Masuk/Keluar RT</h3>
+                          <p className="text-[11px] text-blue-200 mt-0.5">Riwayat kas RT lengkap dengan saldo berjalan, urut dari transaksi paling lama.</p>
+                        </div>
+                      </div>
+                      <div className="max-h-96 overflow-y-auto pr-1">
+                        <table className="w-full text-[11px] font-semibold">
+                          <thead className="sticky top-0 bg-blue-950">
+                            <tr className="text-blue-300 uppercase text-[9px] text-left border-b border-blue-800">
+                              <th className="py-1.5 pr-2">Tanggal</th>
+                              <th className="py-1.5 pr-2">Keterangan</th>
+                              <th className="py-1.5 pr-2">Jenis</th>
+                              <th className="py-1.5 pr-2 text-right">Nominal</th>
+                              <th className="py-1.5 pl-2 text-right">Saldo</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dataKasRt.map(t => (
+                              <tr key={t.id} className="border-b border-blue-900/60 last:border-0">
+                                <td className="py-1.5 pr-2 text-blue-200 whitespace-nowrap">{t.tanggal}</td>
+                                <td className="py-1.5 pr-2 text-white">{t.keterangan}</td>
+                                <td className="py-1.5 pr-2">
+                                  <span className={`font-black ${t.jenis === 'Masuk' ? 'text-emerald-400' : 'text-rose-400'}`}>{t.jenis === 'Masuk' ? '▲ Masuk' : '▼ Keluar'}</span>
+                                </td>
+                                <td className={`py-1.5 pr-2 text-right font-black whitespace-nowrap ${t.jenis === 'Masuk' ? 'text-emerald-400' : 'text-rose-400'}`}>{t.jenis === 'Masuk' ? '+' : '-'}Rp{t.nominal.toLocaleString('id-ID')}</td>
+                                <td className="py-1.5 pl-2 text-right text-amber-300 font-bold whitespace-nowrap">Rp{t.saldoSetelah.toLocaleString('id-ID')}</td>
+                              </tr>
+                            ))}
+                            {dataKasRt.length === 0 && (
+                              <tr><td colSpan={5} className="py-3 text-center text-blue-300 italic">Belum ada transaksi kas RT yang dicatat.</td></tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="mt-3 bg-blue-950/60 rounded-xl py-2.5 px-4 flex items-center justify-between border border-blue-800">
+                        <span className="text-slate-300 text-[10px] font-bold uppercase tracking-wide">Sisa Saldo Kas RT</span>
+                        <span className="text-amber-400 font-black text-sm">Rp{saldoKasRtSaatIni.toLocaleString('id-ID')}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
