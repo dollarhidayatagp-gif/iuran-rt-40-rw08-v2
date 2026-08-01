@@ -736,6 +736,25 @@ export default function IuranWargaRTApp() {
   const [editingStrukturId, setEditingStrukturId] = useState(null);
 
   // ==========================================
+  // SERBA-SERBI UMKM RT (GALERI PRODUK UMKM WARGA)
+  // -----------------------------------------------------------
+  // Dikelola Admin lewat CMS Super Editor (foto produk, nama produk,
+  // deskripsi, & nomor WhatsApp pemilik produk), otomatis tampil di halaman
+  // Beranda (Web Utama) untuk SEMUA akun sebagai dukungan UMKM warga RT.
+  // Tombol "Chat WhatsApp" pada tiap kartu langsung terkoneksi ke nomor WA
+  // pemilik produk masing-masing (pakai helper buatLinkWhatsapp yang sama
+  // dengan kontak RT). Disediakan 4 slot contoh secara default.
+  // ==========================================
+  const [umkmList, setUmkmList] = useState([
+    { id: 'UMKM-01', namaProduk: 'Contoh: Nasi Uduk Bu Sari', deskripsi: 'Contoh: Nasi uduk komplit, siap antar area RT (data simulasi)', noWa: '', foto: null },
+    { id: 'UMKM-02', namaProduk: 'Contoh: Laundry Kiloan Berkah', deskripsi: 'Contoh: Cuci-setrika kiloan, ambil-antar gratis (data simulasi)', noWa: '', foto: null },
+    { id: 'UMKM-03', namaProduk: 'Contoh: Snack Box Ibu-Ibu PKK', deskripsi: 'Contoh: Terima pesanan snack box untuk acara (data simulasi)', noWa: '', foto: null },
+    { id: 'UMKM-04', namaProduk: 'Contoh: Bengkel Motor Pak Joko', deskripsi: 'Contoh: Servis & tambal ban, buka tiap hari (data simulasi)', noWa: '', foto: null },
+  ]);
+  const [formUmkmBaru, setFormUmkmBaru] = useState({ namaProduk: '', deskripsi: '', noWa: '', foto: null });
+  const [editingUmkmId, setEditingUmkmId] = useState(null);
+
+  // ==========================================
   // PERBAIKAN: nama Bendahara yang tampil & di-link ke Kuitansi Digital
   // -----------------------------------------------------------
   // SEBELUMNYA nama Bendahara di kuitansi diambil dari field teks terpisah
@@ -1290,6 +1309,13 @@ export default function IuranWargaRTApp() {
       return next;
     });
   };
+  const updateUmkm = (updater) => {
+    setUmkmList(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      syncSheet('UMKM', next);
+      return next;
+    });
+  };
   const updatePeriode = (updater) => {
     setPeriodeAktif(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
@@ -1429,6 +1455,7 @@ export default function IuranWargaRTApp() {
       const dataKelompok = semua.kelompok || [];
       const dataPengajuan = semua.pengajuan || [];
       const dataStruktur = semua.strukturRT || [];
+      const dataUmkm = semua.umkm || [];
       const dataPengaturan = semua.pengaturan || [];
       const dataPeriode = semua.periode || [];
       const dataRiwayatPeriode = semua.riwayatPeriode || [];
@@ -1463,6 +1490,10 @@ export default function IuranWargaRTApp() {
       // ketimpa balik oleh state lama saat auto-refresh). Sekarang SELALU
       // ikuti apa pun isi sheet (termasuk kalau memang kosong).
       if (Array.isArray(dataStruktur)) setStrukturRt(dataStruktur.map(d => ({ ...d, foto: toDirectImageUrl(d.foto) })));
+      // Galeri UMKM RT - sama seperti strukturRt, kalau memang isi sheet
+      // "UMKM" kosong (Admin belum pernah isi / sudah dihapus semua), ikuti
+      // apa adanya supaya tidak nyangkut data dummy contoh terus-menerus.
+      if (Array.isArray(dataUmkm) && dataUmkm.length) setUmkmList(dataUmkm.map(u => ({ ...u, foto: toDirectImageUrl(u.foto) })));
       if (Array.isArray(dataPeriode) && dataPeriode.length) setPeriodeAktif(dataPeriode[0]);
       if (Array.isArray(dataRiwayatPeriode)) setRiwayatPeriode(dataRiwayatPeriode);
       if (Array.isArray(dataRiwayatKasRt) && dataRiwayatKasRt.length) setRiwayatKasRt(dataRiwayatKasRt.map(t => ({ ...t, nominal: Number(t.nominal) || 0 })));
@@ -2692,6 +2723,44 @@ export default function IuranWargaRTApp() {
     updateStruktur(strukturRt.filter(d => d.id !== id));
     if (editingStrukturId === id) { setEditingStrukturId(null); setFormStrukturBaru({ nama: '', jabatan: '', foto: null }); }
     showToast('Anggota struktur RT berhasil dihapus.', 'error');
+  };
+
+  // UPLOAD FOTO PRODUK UMKM RT (tampil di panel "Serba-Serbi UMKM RT" Web Utama)
+  const handleFotoUmkmChange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    showToast('Mengunggah foto produk UMKM...', 'sukses');
+    const url = await uploadFotoKeDrive(file, 'UMKM-RT');
+    setFormUmkmBaru(prev => ({ ...prev, foto: url }));
+    e.target.value = '';
+  };
+
+  const handleTambahUmkm = (e) => {
+    e.preventDefault();
+    if (!formUmkmBaru.namaProduk.trim() || !formUmkmBaru.noWa.trim()) {
+      showToast('Nama produk dan nomor WhatsApp pemilik produk wajib diisi.', 'error');
+      return;
+    }
+    if (editingUmkmId) {
+      updateUmkm(umkmList.map(u => u.id === editingUmkmId ? { ...u, namaProduk: formUmkmBaru.namaProduk.trim(), deskripsi: formUmkmBaru.deskripsi.trim(), noWa: formUmkmBaru.noWa.trim(), foto: formUmkmBaru.foto } : u));
+      showToast('Produk UMKM berhasil diperbarui & langsung tampil di Web Utama.');
+    } else {
+      updateUmkm([...umkmList, { id: 'UMKM-' + Date.now(), namaProduk: formUmkmBaru.namaProduk.trim(), deskripsi: formUmkmBaru.deskripsi.trim(), noWa: formUmkmBaru.noWa.trim(), foto: formUmkmBaru.foto }]);
+      showToast('Produk UMKM berhasil ditambahkan & langsung tampil di Web Utama untuk semua akun.');
+    }
+    setFormUmkmBaru({ namaProduk: '', deskripsi: '', noWa: '', foto: null });
+    setEditingUmkmId(null);
+  };
+
+  const handleEditUmkm = (item) => {
+    setEditingUmkmId(item.id);
+    setFormUmkmBaru({ namaProduk: item.namaProduk, deskripsi: item.deskripsi, noWa: item.noWa, foto: item.foto });
+  };
+
+  const handleHapusUmkm = (id) => {
+    updateUmkm(umkmList.filter(u => u.id !== id));
+    if (editingUmkmId === id) { setEditingUmkmId(null); setFormUmkmBaru({ namaProduk: '', deskripsi: '', noWa: '', foto: null }); }
+    showToast('Produk UMKM berhasil dihapus.', 'error');
   };
 
   // UPLOAD FOTO UMUM RT (tampil di panel "Informasi Umum RT" Web Utama)
@@ -4703,8 +4772,8 @@ export default function IuranWargaRTApp() {
                       <tr className="text-slate-400 border-b text-left">
                         <th className="py-1.5 px-2 font-bold">Tanggal</th>
                         <th className="py-1.5 px-2 font-bold">Keterangan</th>
-                        <th className="py-1.5 px-2 font-bold text-right">Masuk</th>
-                        <th className="py-1.5 px-2 font-bold text-right">Keluar</th>
+                        <th className="py-1.5 px-2 font-bold text-right"><span className="text-emerald-600">▲</span> Masuk</th>
+                        <th className="py-1.5 px-2 font-bold text-right"><span className="text-rose-500">▼</span> Keluar</th>
                         <th className="py-1.5 px-2 font-bold text-right">Saldo</th>
                       </tr>
                     </thead>
@@ -4713,8 +4782,8 @@ export default function IuranWargaRTApp() {
                         <tr key={t.id} className="border-b border-slate-50">
                           <td className="py-1.5 px-2 text-slate-500 whitespace-nowrap">{formatTanggalLaporan(t.tanggal)}</td>
                           <td className="py-1.5 px-2 text-slate-700 font-semibold">{t.keterangan}</td>
-                          <td className="py-1.5 px-2 text-right font-bold text-emerald-700">{t.jenis === 'Masuk' ? `Rp${Number(t.nominal).toLocaleString('id-ID')}` : '-'}</td>
-                          <td className="py-1.5 px-2 text-right font-bold text-rose-600">{t.jenis === 'Keluar' ? `Rp${Number(t.nominal).toLocaleString('id-ID')}` : '-'}</td>
+                          <td className="py-1.5 px-2 text-right font-bold text-emerald-700 whitespace-nowrap">{t.jenis === 'Masuk' ? <>▲ Rp{Number(t.nominal).toLocaleString('id-ID')}</> : '-'}</td>
+                          <td className="py-1.5 px-2 text-right font-bold text-rose-600 whitespace-nowrap">{t.jenis === 'Keluar' ? <>▼ Rp{Number(t.nominal).toLocaleString('id-ID')}</> : '-'}</td>
                           <td className="py-1.5 px-2 text-right font-bold text-slate-900 whitespace-nowrap">Rp{t.saldoSetelah.toLocaleString('id-ID')}</td>
                         </tr>
                       ))}
@@ -4792,6 +4861,58 @@ export default function IuranWargaRTApp() {
                         </div>
                         <p className="font-black text-slate-900 leading-tight">{d.nama}</p>
                         <p className="text-[9px] font-bold text-emerald-700 uppercase tracking-wide mt-0.5">{d.jabatan}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* SERBA-SERBI UMKM RT (DIKELOLA ADMIN DARI CMS SUPER EDITOR)
+                  Ruang promosi UMKM warga di bawah kartu Struktur Pengurus RT,
+                  terlihat oleh SEMUA akun (belum login, warga, maupun admin lain).
+                  Background navy gradasi (bukan oranye) dengan teks warna menyala,
+                  setiap kartu ada foto produk, nama & deskripsi produk, serta
+                  tombol Chat WhatsApp yang langsung terkoneksi ke nomor WA
+                  pemilik produk masing-masing untuk mendukung UMKM RT. */}
+              {umkmList.length > 0 && (
+                <div className="bg-white p-6 rounded-3xl border shadow-xs h-fit">
+                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest text-center mb-1">🛍️ Serba-Serbi UMKM {cmsTeks.namaRT}</h3>
+                  <p className="text-[10px] text-slate-400 text-center mb-4">Dukung usaha warga - klik Chat WhatsApp untuk pesan langsung ke pemilik produk.</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {umkmList.map(u => (
+                      <div key={u.id} className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 border border-blue-800 rounded-2xl overflow-hidden flex flex-col shadow-lg shadow-blue-950/30">
+                        <div className="w-full h-24 sm:h-28 bg-blue-900/60 flex items-center justify-center overflow-hidden">
+                          {u.foto ? (
+                            <img
+                              loading="lazy"
+                              decoding="async"
+                              src={toDirectImageUrl(u.foto)}
+                              alt={u.namaProduk}
+                              className="w-full h-full object-cover"
+                              onError={(e) => { e.target.style.display = 'none'; }}
+                            />
+                          ) : (
+                            <span className="text-[9px] text-blue-300 font-bold">Belum ada foto produk</span>
+                          )}
+                        </div>
+                        <div className="p-2.5 flex-1 flex flex-col">
+                          <p className="text-amber-300 font-black text-[11px] leading-tight drop-shadow-[0_0_6px_rgba(252,211,77,0.55)]">{u.namaProduk}</p>
+                          {u.deskripsi && (
+                            <p className="text-blue-200 text-[9px] font-semibold leading-snug mt-1 flex-1">{u.deskripsi}</p>
+                          )}
+                          {u.noWa ? (
+                            <a
+                              href={`${buatLinkWhatsapp(u.noWa)}?text=${encodeURIComponent(`Halo, saya lihat produk "${u.namaProduk}" di Web Utama ${cmsTeks.namaRT}. Apakah masih tersedia?`)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-2 bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-black text-[9px] text-center py-1.5 rounded-lg tracking-wide transition-colors"
+                            >
+                              💬 Chat WhatsApp
+                            </a>
+                          ) : (
+                            <span className="mt-2 bg-blue-900/60 text-blue-300 font-bold text-[9px] text-center py-1.5 rounded-lg italic">Nomor WA belum diisi</span>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -7217,6 +7338,64 @@ export default function IuranWargaRTApp() {
                           <button type="button" onClick={() => { setEditingStrukturId(null); setFormStrukturBaru({ nama: '', jabatan: '', foto: null }); }} className="bg-slate-200 text-slate-700 font-bold px-3 py-1.5 rounded-xl text-[11px]">Batal</button>
                         )}
                         <button type="submit" className="bg-emerald-700 text-white font-bold px-4 py-1.5 rounded-xl text-[11px]">{editingStrukturId ? 'Simpan Perubahan' : '+ Tambah Anggota'}</button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* SERBA-SERBI UMKM RT - galeri promosi produk UMKM warga, tampil
+                      di halaman Beranda (Web Utama) di bawah kartu "Struktur
+                      Pengurus RT", terlihat oleh SEMUA akun. */}
+                  <div className="border-t pt-4">
+                    <h4 className="text-slate-900 font-black text-xs mb-1">🛍️ Serba-Serbi UMKM RT</h4>
+                    <p className="text-[10px] text-slate-400 mb-3">Kelola foto produk, nama produk, deskripsi singkat, & nomor WhatsApp pemilik produk. Otomatis tampil sebagai galeri kartu UMKM di halaman Beranda (Web Utama) untuk semua akun, lengkap dengan tombol Chat WhatsApp yang langsung terkoneksi ke nomor WA pemilik produk masing-masing.</p>
+
+                    <div className="space-y-2 mb-4">
+                      {umkmList.map(u => (
+                        <div key={u.id} className="flex items-center gap-3 p-2.5 bg-slate-50 border rounded-xl">
+                          <div className="w-11 h-11 rounded-lg border bg-white overflow-hidden shrink-0 flex items-center justify-center relative">
+                            <span className="text-slate-300 text-[9px]">Foto</span>
+                            {u.foto && (
+                              <img
+                                loading="lazy"
+                                decoding="async"
+                                src={toDirectImageUrl(u.foto)}
+                                alt={u.namaProduk}
+                                className="w-full h-full object-cover absolute inset-0"
+                                onError={(e) => { e.target.style.display = 'none'; }}
+                              />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-black text-slate-900 truncate">{u.namaProduk}</p>
+                            <p className="text-slate-500 text-[10px] truncate">{u.deskripsi}</p>
+                            <p className="text-emerald-700 font-bold text-[10px]">{u.noWa ? `WA: ${u.noWa}` : 'Nomor WA belum diisi'}</p>
+                          </div>
+                          <button type="button" onClick={() => handleEditUmkm(u)} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded text-[10px] font-bold shrink-0">Edit</button>
+                          <button type="button" onClick={() => handleHapusUmkm(u.id)} className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded text-[10px] font-bold shrink-0">Hapus</button>
+                        </div>
+                      ))}
+                      {umkmList.length === 0 && <p className="text-slate-400 italic text-[11px]">Belum ada produk UMKM yang ditambahkan.</p>}
+                    </div>
+
+                    <form onSubmit={handleTambahUmkm} className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 space-y-2">
+                      <p className="text-emerald-800 font-black text-[11px]">{editingUmkmId ? 'Edit Produk UMKM' : 'Tambah Produk UMKM Baru'}</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <input type="text" placeholder="Nama Produk (mis. Nasi Uduk Bu Sari)" value={formUmkmBaru.namaProduk} onChange={(e) => setFormUmkmBaru({...formUmkmBaru, namaProduk: e.target.value})} className="w-full border p-2 rounded-xl bg-white" />
+                        <input type="text" placeholder="Nomor WhatsApp Pemilik (mis. 081234567890)" value={formUmkmBaru.noWa} onChange={(e) => setFormUmkmBaru({...formUmkmBaru, noWa: e.target.value})} className="w-full border p-2 rounded-xl bg-white" />
+                        <input type="file" accept="image/*" onChange={handleFotoUmkmChange} className="w-full border p-2 rounded-xl bg-white text-[11px]" />
+                      </div>
+                      <textarea rows={2} placeholder="Deskripsi singkat produk" value={formUmkmBaru.deskripsi} onChange={(e) => setFormUmkmBaru({...formUmkmBaru, deskripsi: e.target.value})} className="w-full border p-2 rounded-xl bg-white" />
+                      {formUmkmBaru.foto && (
+                        <div className="flex items-center gap-2">
+                          <img loading="lazy" decoding="async" src={formUmkmBaru.foto} alt="Preview" className="w-10 h-10 rounded-lg object-cover border" />
+                          <button type="button" onClick={() => setFormUmkmBaru(prev => ({ ...prev, foto: null }))} className="text-[10px] font-bold text-rose-600">Hapus Foto</button>
+                        </div>
+                      )}
+                      <div className="flex gap-2 justify-end">
+                        {editingUmkmId && (
+                          <button type="button" onClick={() => { setEditingUmkmId(null); setFormUmkmBaru({ namaProduk: '', deskripsi: '', noWa: '', foto: null }); }} className="bg-slate-200 text-slate-700 font-bold px-3 py-1.5 rounded-xl text-[11px]">Batal</button>
+                        )}
+                        <button type="submit" className="bg-emerald-700 text-white font-bold px-4 py-1.5 rounded-xl text-[11px]">{editingUmkmId ? 'Simpan Perubahan' : '+ Tambah Produk'}</button>
                       </div>
                     </form>
                   </div>
