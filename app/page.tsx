@@ -4381,6 +4381,12 @@ export default function IuranWargaRTApp() {
                       <span>{cmsTeks.pengumuman}</span>
                     </div>
                   </div>
+                  {/* TEKS KECIL PROMOSI JASA WEBSITE - tampil di bawah kotak running
+                      text pengumuman RT, di halaman Web Utama saja. */}
+                  <p className="text-[9px] text-blue-300/80 text-center mt-2 leading-relaxed drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">
+                    Butuh Website untuk Usaha Kamu? Hubungi saya untuk diskusi konsep &amp; penawaran harga WA{' '}
+                    <a href="https://wa.me/6282421117131" target="_blank" rel="noopener noreferrer" className="underline font-bold hover:text-amber-300 transition-colors">0822421117131</a>
+                  </p>
                 </div>
               </div>
 
@@ -4539,14 +4545,14 @@ export default function IuranWargaRTApp() {
                       )}
                     </ul>
                     {/* JAM BERJALAN DIGITAL - WAKTU WIB (ASIA/JAKARTA), UPDATE OTOMATIS TIAP DETIK */}
-                    <div className="mt-3 bg-emerald-950 rounded-xl py-3 px-4 text-center">
+                    <div className="mt-3 bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 rounded-xl py-3 px-4 text-center">
                       <p className="text-amber-400 font-black text-2xl tracking-widest font-mono">{jamSekarang}</p>
                       <p className="text-slate-300 text-[9px] font-bold mt-0.5 uppercase tracking-wide">{tanggalSekarang} • WIB</p>
                     </div>
                     {/* RUNNING TEXT (MARQUEE) - menggantikan teks statis, berjalan terus
                         menerus tanpa henti supaya kotak info selalu "hidup". Background
                         navy transparan + teks warna menyala supaya senada tema navy. */}
-                    <div className="mt-2 bg-blue-950/50 backdrop-blur-sm border border-blue-400/30 rounded-xl py-2 px-3 flex items-center gap-2">
+                    <div className="mt-2 bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 border border-blue-800 rounded-xl py-2 px-3 flex items-center gap-2">
                       <span className="text-base shrink-0">🔔</span>
                       <div className="marquee-wrap flex-1 min-w-0">
                         <div className="marquee-track text-amber-300 text-[10px] font-black drop-shadow-[0_0_5px_rgba(252,211,77,0.65)]">
@@ -4681,9 +4687,16 @@ export default function IuranWargaRTApp() {
               </div>
 
               {/* BUKU KAS MASUK/KELUAR RT (TRANSPARANSI PUBLIK - TAMPIL DI BAWAH KARTU PENDAFTARAN AKUN) */}
-              <div className="bg-white p-6 rounded-3xl border shadow-xs h-fit">
-                <h3 className="text-sm font-black text-slate-900 text-center mb-1">📒 Buku Kas Masuk/Keluar RT</h3>
-                <p className="text-[10px] text-slate-400 text-center mb-4">Riwayat transaksi kas RT beserta saldo berjalan, transparan untuk seluruh warga.</p>
+              <div className="bg-white rounded-3xl border shadow-xs h-fit overflow-hidden">
+                {/* HEADER NAVY + keterangan bahwa ini data REAL (bukan simulasi),
+                    sudah diverifikasi Pengurus RT - supaya warga/pengunjung yakin
+                    tabel ini transparan & bisa dipercaya, bukan sekadar contoh. */}
+                <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 px-6 py-4">
+                  <h3 className="text-sm font-black text-white text-center mb-1">📒 Buku Kas Masuk/Keluar RT</h3>
+                  <p className="text-[10px] text-blue-200 text-center">Riwayat transaksi kas RT beserta saldo berjalan, transparan untuk seluruh warga.</p>
+                  <p className="text-[9px] text-emerald-300 font-black text-center mt-1.5 flex items-center justify-center gap-1">✅ Data real yang sudah diverifikasi oleh Pengurus RT</p>
+                </div>
+                <div className="p-6 pt-4">
                 <div className="overflow-x-auto -mx-2">
                   <table className="w-full text-[10px] sm:text-[11px]">
                     <thead>
@@ -4714,6 +4727,7 @@ export default function IuranWargaRTApp() {
                 <div className="mt-3 bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 rounded-xl py-2.5 px-4 flex items-center justify-between">
                   <span className="text-slate-300 text-[10px] font-bold uppercase tracking-wide">Sisa Saldo Kas RT</span>
                   <span className="text-amber-400 font-black text-sm">Rp{(getRiwayatKasRtDenganSaldo().slice(-1)[0]?.saldoSetelah ?? 0).toLocaleString('id-ID')}</span>
+                </div>
                 </div>
               </div>
 
