@@ -1394,6 +1394,26 @@ export default function IuranWargaRTApp() {
     return url;
   };
 
+  // ==========================================
+  // HELPER: COCOKKAN NAMA BLOK SECARA TOLERAN (trim spasi + tanpa
+  // membedakan huruf besar/kecil).
+  // -----------------------------------------------------------
+  // SEBELUMNYA pencocokan blok (mis. anggota vs kartu blok, atau akun warga
+  // vs kartu "Blok Rumah Mu") pakai perbandingan string PERSIS (===).
+  // Akibatnya kalau ada sedikit saja perbedaan penulisan di Google Sheets
+  // (misalnya kolom "kelompok" warga tertulis "blok a" / "Blok A " ada
+  // spasi tambahan, sedangkan nama blok di sheet Kelompok tertulis
+  // "Blok A"), datanya dianggap BEDA TOTAL - jumlah KK/Jiwa jadi 0 & kartu
+  // "Blok Rumah Mu" (highlight navy) tidak pernah muncul, padahal secara
+  // kasat mata sama. Sekarang dicocokkan lebih toleran: dibersihkan spasi
+  // di ujung teks & diabaikan besar/kecil huruf, supaya perbedaan
+  // pengetikan kecil di Sheets tidak bikin data "hilang".
+  // ==========================================
+  const cocokBlok = (a, b) => {
+    if (a === undefined || a === null || b === undefined || b === null) return false;
+    return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+  };
+
   const uploadFotoKeDrive = async (file, folder = 'Umum') => {
     const dataUrl = await fileToDataUrl(file);
     if (!cmsTeks.appsScriptUrl) {
@@ -2331,7 +2351,7 @@ export default function IuranWargaRTApp() {
   // begitu juga warga "Pasif" (dianggap sudah tidak menghuni/tidak aktif).
   // ==========================================
   const rekapPerNomorPengajuan = kelompokList.map(k => {
-    const anggotaKelompok = rekapPerAnggota.filter(m => m.kelompok === k.nama && !m.pengurus && m.statusAnggota !== 'Pasif');
+    const anggotaKelompok = rekapPerAnggota.filter(m => cocokBlok(m.kelompok, k.nama) && !m.pengurus && m.statusAnggota !== 'Pasif');
     const targetKelompok = anggotaKelompok.reduce((acc, m) => acc + m.target, 0);
     const masukKelompok = anggotaKelompok.reduce((acc, m) => acc + m.dibayar, 0);
     const pendingKelompok = anggotaKelompok.reduce((acc, m) => acc + m.pending, 0);
@@ -3132,7 +3152,7 @@ export default function IuranWargaRTApp() {
   // yang terdaftar di blok tsb, admin diminta memindahkan warganya dulu lewat
   // "Panel Kontrol Anggota" supaya tidak ada warga yang jadi "nyangkut" tanpa blok.
   const handleHapusKelompok = (k) => {
-    const jumlahWargaDiBlok = members.filter(m => m.kelompok === k.nama).length;
+    const jumlahWargaDiBlok = members.filter(m => cocokBlok(m.kelompok, k.nama)).length;
     if (jumlahWargaDiBlok > 0) {
       showToast(`Tidak bisa menghapus "${k.nama}" karena masih ada ${jumlahWargaDiBlok} warga terdaftar di blok ini. Pindahkan warganya dulu lewat Panel Kontrol Anggota.`, 'error');
       return;
@@ -5098,7 +5118,7 @@ export default function IuranWargaRTApp() {
               // Admin maupun akun user asli). Khusus SIMULASI AKUN, dihitung dari
               // blok & data dummy (INFORMASI_WARGA_DUMMY), bukan blok/data asli.
               const perBlokSemua = (isSimulatedSession ? KELOMPOK_DUMMY_INFORMASI_WARGA : kelompokList).map(k => {
-                const anggotaBlokIni = dataWarga.filter(m => m.kelompok === k.nama);
+                const anggotaBlokIni = dataWarga.filter(m => cocokBlok(m.kelompok, k.nama));
                 const jumlahKK = anggotaBlokIni.length;
                 const jumlahJiwa = jumlahKK + anggotaBlokIni.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
                 return { ...k, jumlahKK, jumlahJiwa };
@@ -5258,7 +5278,7 @@ export default function IuranWargaRTApp() {
                         const persen = modePersenBlok === 'kk' ? persenKK : persenJiwa;
                         const rincianTerbuka = rincianBlokTerbuka === k.nama;
                         // Daftar KK & anggota keluarga di blok ini (khusus untuk rincian admin)
-                        const kkDiBlokIni = role === 'admin' ? dataWarga.filter(m => m.kelompok === k.nama) : [];
+                        const kkDiBlokIni = role === 'admin' ? dataWarga.filter(m => cocokBlok(m.kelompok, k.nama)) : [];
                         return (
                           <div key={k.id} className="text-[11px] font-semibold">
                             <div className="flex justify-between items-center mb-1">
@@ -5351,7 +5371,7 @@ export default function IuranWargaRTApp() {
                       return found ? found.tanggalKeluar : null;
                     };
                     const perBlokPasifSemua = (isSimulatedSession ? KELOMPOK_DUMMY_INFORMASI_WARGA : kelompokList).map(k => {
-                      const pasifBlokIni = dataWargaSemua.filter(m => m.kelompok === k.nama && m.statusAnggota === 'Pasif');
+                      const pasifBlokIni = dataWargaSemua.filter(m => cocokBlok(m.kelompok, k.nama) && m.statusAnggota === 'Pasif');
                       return { ...k, pasifBlokIni };
                     });
                     const totalPasifSemua = dataWargaSemua.filter(m => m.statusAnggota === 'Pasif').length;
@@ -6184,7 +6204,7 @@ export default function IuranWargaRTApp() {
                       // Rekap Blok Rumah sekarang SAMA untuk Admin maupun akun user
                       // (warga) - menampilkan seluruh KK di tiap blok, bukan hanya
                       // keluarga sendiri, supaya warga bisa lihat data seluruh RT.
-                      const anggotaKelompok = anggotaSemuaUntukTampil.filter(m => m.kelompok === k.nama);
+                      const anggotaKelompok = anggotaSemuaUntukTampil.filter(m => cocokBlok(m.kelompok, k.nama));
                       const rekapUsia = getRekapKategoriUsia(anggotaKelompok);
                       const totalJiwa = anggotaKelompok.length + anggotaKelompok.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
                       // BLOK RUMAH MU: khusus akun user (bukan admin), blok yang SAMA
@@ -6197,7 +6217,7 @@ export default function IuranWargaRTApp() {
                       // sedang aktif (activeUserSession.kelompok), kartu blok itu
                       // ditandai beda (gradasi navy + label "Detail Informasi Blok
                       // Anda") supaya langsung kelihatan tanpa harus dicari-cari.
-                      const isBlokSaya = role !== 'admin' && activeUserSession && k.nama === activeUserSession.kelompok;
+                      const isBlokSaya = role !== 'admin' && activeUserSession && cocokBlok(k.nama, activeUserSession.kelompok);
                       return (
                         <div key={k.id} className={`p-4 rounded-xl space-y-2 transition-all duration-200 ${isBlokSaya ? 'border border-blue-900 bg-gradient-to-br from-blue-950 via-blue-900 to-indigo-900 text-white shadow-lg shadow-blue-900/30 ring-2 ring-blue-400/40' : 'border bg-slate-50'}`}>
                           {isBlokSaya && (
@@ -6975,7 +6995,7 @@ export default function IuranWargaRTApp() {
                       <div key={k.id} className="flex items-center gap-3 p-2.5 bg-slate-50 border rounded-xl text-xs">
                         <div className="flex-1 min-w-0">
                           <p className="font-black text-slate-900 truncate">{k.nama} <span className="text-slate-400 font-normal">({k.jenis})</span></p>
-                          <p className="text-[10px] text-slate-400">{members.filter(m => m.kelompok === k.nama).length} KK terdaftar • No. {k.noPengajuan}</p>
+                          <p className="text-[10px] text-slate-400">{members.filter(m => cocokBlok(m.kelompok, k.nama)).length} KK terdaftar • No. {k.noPengajuan}</p>
                         </div>
                         <span className={`px-2 py-0.5 rounded text-[10px] font-black shrink-0 ${k.status === 'Progress' ? 'bg-emerald-600 text-white' : 'bg-slate-400 text-white'}`}>{k.status}</span>
                         <button type="button" onClick={() => handleToggleStatusKelompok(k.id)} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded text-[10px] font-bold shrink-0">{k.status === 'Progress' ? 'Tutup' : 'Buka'}</button>
