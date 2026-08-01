@@ -2,6 +2,39 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 // =====================================================================
+// HELPER: RANDOM "BER-SEED" (SUPAYA DATA SIMULASI ACAK TAPI KONSISTEN)
+// -----------------------------------------------------------
+// Dipakai KHUSUS untuk membagi 50 KK data contoh/simulasi secara ACAK ke
+// tiap blok (bukan pola tetap 2-3 KK berulang seperti sebelumnya). Pakai
+// seed tetap supaya angkanya TIDAK berubah-ubah tiap kali komponen
+// render ulang (kalau pakai Math.random() polos, angka KK per blok bisa
+// "kedip"/berubah terus setiap ada interaksi lain di halaman).
+// =====================================================================
+function randomBerSeed(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+// Membagi `totalKK` secara ACAK (tapi konsisten, lihat randomBerSeed di atas)
+// ke seluruh nama blok di `daftarBlok` - dipakai untuk data DUMMY/simulasi
+// saja (Rekap Blok Rumah & Informasi Warga versi simulasi), supaya tampilan
+// contoh terlihat wajar (ada blok yang ramai, ada yang masih kosong) persis
+// seperti kondisi RT sungguhan, bukan data ASLI warga.
+function distribusiRandomKKPerBlok(daftarBlok, totalKK, seed = 42) {
+  const rand = randomBerSeed(seed);
+  const hasil = {};
+  daftarBlok.forEach((b) => { hasil[b] = 0; });
+  for (let i = 0; i < totalKK; i++) {
+    const idx = Math.floor(rand() * daftarBlok.length);
+    hasil[daftarBlok[idx]] += 1;
+  }
+  return hasil;
+}
+
+// =====================================================================
 // KOMPONEN: PILIHAN DROPDOWN (PENGGANTI <select> NATIVE)
 // -----------------------------------------------------------
 // PERBAIKAN: <select> bawaan HTML memakai tampilan "native" dari
@@ -852,14 +885,12 @@ export default function IuranWargaRTApp() {
     'Umi Kalsum', 'Vina Melati', 'Wahyu Nugroho', 'Xena Anindya', 'Yusuf Mahendra', 'Zahra Amelia',
   ];
   // TARGET JUMLAH KK PER BLOK (KHUSUS DATA DUMMY SIMULASI) - total = 50 KK,
-  // tersebar ke seluruh 22 blok (Blok A, Blok B, F1-F14, G1-G6) dengan
-  // variasi 1-3 KK per blok supaya tampilannya wajar (tidak ada yang 0).
-  const TARGET_KK_PER_BLOK_SIMULASI = {
-    'Blok A': 3, 'Blok B': 2,
-    'Blok F1': 2, 'Blok F2': 3, 'Blok F3': 2, 'Blok F4': 2, 'Blok F5': 3, 'Blok F6': 2, 'Blok F7': 2,
-    'Blok F8': 3, 'Blok F9': 2, 'Blok F10': 2, 'Blok F11': 3, 'Blok F12': 2, 'Blok F13': 2, 'Blok F14': 3,
-    'Blok G1': 2, 'Blok G2': 2, 'Blok G3': 2, 'Blok G4': 2, 'Blok G5': 2, 'Blok G6': 2,
-  };
+  // dibagi ACAK (bukan pola tetap lagi) ke seluruh 22 blok (Blok A, Blok B,
+  // F1-F14, G1-G6) memakai distribusiRandomKKPerBlok (seed tetap supaya
+  // tidak berubah-ubah tiap render, tapi tetap terlihat acak/wajar - ada
+  // blok yang ramai, ada yang masih 0/kosong, sama seperti RT sungguhan).
+  const NAMA_SEMUA_BLOK_SIMULASI = ['Blok A', 'Blok B', ...NAMA_BLOK_TAMBAHAN_FG];
+  const TARGET_KK_PER_BLOK_SIMULASI = distribusiRandomKKPerBlok(NAMA_SEMUA_BLOK_SIMULASI, 50, 42);
   // Susun daftar blok untuk tiap KK DUMMY yang perlu dibuat (nama blok
   // diulang sebanyak target KK-nya) - urutan ini juga dipakai sebagai idx
   // global supaya nama warga contoh & tanggal lahir anggota keluarga tetap
@@ -933,15 +964,22 @@ export default function IuranWargaRTApp() {
     { id: 'SIM-GRP-B', nama: 'Blok B', jenis: 'Rumah', kapasitas: 50, status: 'Progress', tglDibuat: '11 Jul 2026' },
     ...kelompokTambahanBlokFG,
   ];
-  // Diambil 2 contoh (1 dari Blok F, 1 dari Blok G) dari dataset DUMMY di
-  // atas supaya tombol "Simulasi Akun Pengguna" di Web Utama juga bisa
-  // langsung memperlihatkan tampilan Dashboard & Rekap Blok Rumah untuk
-  // warga di Blok F/G, bukan cuma Blok A/B - murni untuk pratinjau, TIDAK
-  // terhubung ke database `members` asli.
-  const CONTOH_SIMULASI_TAMBAHAN_FG = [
-    MEMBERS_DUMMY_REKAP_BLOK.find(m => m.kelompok === 'Blok F1'),
-    MEMBERS_DUMMY_REKAP_BLOK.find(m => m.kelompok === 'Blok G1'),
-  ];
+  // Diambil 2 contoh (1 dari Blok F manapun, 1 dari Blok G manapun) dari
+  // dataset DUMMY di atas supaya tombol "Simulasi Akun Pengguna" di Web
+  // Utama juga bisa langsung memperlihatkan tampilan Dashboard & Rekap Blok
+  // Rumah untuk warga di Blok F/G, bukan cuma Blok A/B - murni untuk
+  // pratinjau, TIDAK terhubung ke database `members` asli.
+  // PENTING - PERBAIKAN BUG: dulu SENGAJA hardcode cari 'Blok F1' & 'Blok G1'
+  // persis, tapi sekarang jumlah KK per blok dibagi ACAK (lihat
+  // distribusiRandomKKPerBlok) sehingga blok F1/G1 BISA SAJA kebagian 0 KK -
+  // .find() jadi balik `undefined` & bikin error "Cannot read properties of
+  // undefined" saat dipakai di .map() (menu Simulasi landing page). Sekarang
+  // dicari BLOK F/G MANAPUN yang benar-benar ada KK-nya (bukan cuma F1/G1
+  // persis), plus fallback terakhir ke KK dummy pertama supaya TIDAK PERNAH
+  // `undefined` walau seed acaknya kebetulan bikin semua Blok F/G kosong.
+  const contohBlokF = MEMBERS_DUMMY_REKAP_BLOK.find(m => m.kelompok.startsWith('Blok F')) || MEMBERS_DUMMY_REKAP_BLOK[0];
+  const contohBlokG = MEMBERS_DUMMY_REKAP_BLOK.find(m => m.kelompok.startsWith('Blok G')) || MEMBERS_DUMMY_REKAP_BLOK[0];
+  const CONTOH_SIMULASI_TAMBAHAN_FG = [contohBlokF, contohBlokG].filter(Boolean);
 
   // ==========================================
   // 2. DATABASE MASTER ANGGOTA
@@ -988,12 +1026,12 @@ export default function IuranWargaRTApp() {
     { id: 'SIM-WB-03', nama: 'Contoh Warga Baru 3 (Simulasi)', nomorRumah: 'Blok F5 No. 2', bergabung: '2026-07-05' },
   ];
   const WARGA_KELUAR_DUMMY = [
-    { id: 'SIM-WK-01', nama: 'Contoh Warga Keluar 1 (Simulasi)', blok: 'Blok C No. 9', tanggalKeluar: '2026-06-18' },
+    { id: 'SIM-WK-01', nama: 'Contoh Warga Keluar 1 (Simulasi)', blok: 'Blok F2 No. 9', tanggalKeluar: '2026-06-18' },
     { id: 'SIM-WK-02', nama: 'Contoh Warga Keluar 2 (Simulasi)', blok: 'Blok G3 No. 6', tanggalKeluar: '2026-05-30' },
   ];
 
   // ==========================================
-  // DATA DUMMY "INFORMASI WARGA" KHUSUS SIMULASI (±50 KK)
+  // DATA DUMMY "INFORMASI WARGA" KHUSUS SIMULASI (50 KK)
   // -----------------------------------------------------------
   // Khusus untuk SIMULASI AKUN (isSimulatedSession), seluruh angka & grafik
   // di menu "Informasi Warga" (Total KK, Total Jiwa, Laki-laki, Perempuan,
@@ -1002,11 +1040,14 @@ export default function IuranWargaRTApp() {
   // yang mencoba tombol Simulasi tidak melihat data pribadi warga sungguhan.
   // Akun yang benar-benar login (hasil pendaftaran & aktivasi admin) TETAP
   // memakai data ASLI dari `members` (lihat isSimulatedSession di bawah).
+  // PENTING: sengaja memakai `DAFTAR_BLOK_UNTUK_KK_DUMMY` yang SAMA dengan
+  // dataset "Rekap Blok Rumah" di atas (bukan daftar blok terpisah lagi),
+  // supaya distribusi 50 KK acak per blok KONSISTEN di semua halaman
+  // simulasi (Informasi Warga, Rekap Blok Rumah, dsb - bukan angka lain-lain).
   // ==========================================
-  const NAMA_BLOK_DUMMY_INFORMASI_WARGA = ['Blok A', 'Blok B', 'Blok C', 'Blok D', 'Blok F1', 'Blok F2', 'Blok G1'];
   const INFORMASI_WARGA_DUMMY = Array.from({ length: 50 }, (_, idx) => {
     const namaKK = `Contoh Warga ${idx + 1} (Simulasi)`;
-    const blokIni = NAMA_BLOK_DUMMY_INFORMASI_WARGA[idx % NAMA_BLOK_DUMMY_INFORMASI_WARGA.length];
+    const blokIni = DAFTAR_BLOK_UNTUK_KK_DUMMY[idx % DAFTAR_BLOK_UNTUK_KK_DUMMY.length];
     const jumlahAnak = idx % 3; // variasi 0-2 anak per KK, supaya Berdasarkan Usia bervariasi
     const anggotaKeluarga = [];
     if (idx % 2 === 0) {
@@ -1026,7 +1067,7 @@ export default function IuranWargaRTApp() {
       anggotaKeluarga,
     };
   });
-  const KELOMPOK_DUMMY_INFORMASI_WARGA = NAMA_BLOK_DUMMY_INFORMASI_WARGA.map((nama, idx) => ({ id: `GRP-SIM-IW-${idx + 1}`, nama, jenis: 'Rumah' }));
+  const KELOMPOK_DUMMY_INFORMASI_WARGA = NAMA_SEMUA_BLOK_SIMULASI.map((nama, idx) => ({ id: `GRP-SIM-IW-${idx + 1}`, nama, jenis: 'Rumah' }));
 
   // ==========================================
   // DATA WARGA KELUAR (WARGA YANG PINDAH/KELUAR DARI LINGKUNGAN RT)
@@ -4853,6 +4894,20 @@ export default function IuranWargaRTApp() {
 
           {/* MAIN CONTAINER WORKSPACE (SCROLL NORMAL, TIDAK TERPOTONG) */}
           <div key={activeMenu} className="flex-1 w-full min-w-0 bg-slate-50 p-4 sm:p-6 lg:p-8 anim-fade pb-20 overflow-x-auto">
+
+            {/* BANNER MODE SIMULASI - tampil di ATAS SEMUA halaman/menu sidebar
+                selama akun masih memakai data contoh (isSimulatedSession),
+                supaya jelas & tidak membingungkan warga bahwa data yang
+                dilihat BUKAN data asli. Begitu warga daftar & login memakai
+                akun sungguhan, banner ini otomatis hilang & seluruh halaman
+                langsung menampilkan data ASLI RT. Bahasa sengaja dibuat
+                sesederhana mungkin. */}
+            {isSimulatedSession && (
+              <div className="mb-4 bg-amber-50 border border-amber-300 text-amber-800 rounded-xl px-4 py-2.5 text-[11px] font-bold flex items-center gap-2">
+                <span className="text-base leading-none">🧪</span>
+                <span>Ini cuma contoh tampilan (simulasi), bukan data asli warga. Kalau sudah daftar &amp; login pakai akun sendiri, semua data di sini otomatis berganti jadi data asli.</span>
+              </div>
+            )}
 
             {/* INFORMASI WARGA - DASHBOARD STATISTIK KEPENDUDUKAN (USER & ADMIN, HANYA SETELAH LOGIN) */}
             {activeMenu === 'informasi-warga' && (() => {
