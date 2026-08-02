@@ -1584,6 +1584,46 @@ export default function IuranWargaRTApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmsTeks.appsScriptUrl]);
 
+  // =====================================================================
+  // PERBAIKAN BUG BESAR: "Setelan CMS Admin balik lagi ke default setiap
+  // kali bagian lain di-update"
+  // -----------------------------------------------------------
+  // AKAR MASALAH: `cmsForm` (state form di panel "CMS Super Editor") HANYA
+  // di-inisialisasi SATU KALI dari `cmsTeks` saat komponen ini PERTAMA KALI
+  // dirender (lihat `useState({...cmsTeks, ...})` di atas) - padahal saat
+  // render pertama itu, data ASLI dari Google Sheets BELUM SELESAI ditarik
+  // (proses `muatSemuaDataDariSheet` di atas masih berjalan async), jadi
+  // `cmsForm` ke-"kunci" isinya dengan nilai DEFAULT/kosong SELAMANYA -
+  // tidak pernah ikut ter-update lagi walau `cmsTeks` sendiri sudah benar
+  // berisi data asli hasil fetch.
+  //
+  // AKIBATNYA: begitu admin buka "CMS Super Editor" dan mengetik/mengubah
+  // SATU kolom saja (memicu auto-save `saveCms`), fungsi itu menggabungkan
+  // `cmsTeks` (data asli, benar) dengan SEMUA field dari `cmsForm` (yang
+  // ternyata masih nilai DEFAULT/lama) - hasilnya SEMUA field lain yang
+  // terdaftar di `saveCms` ikut TERTIMPA balik ke default, bukan cuma
+  // kolom yang sedang diedit admin.
+  //
+  // PERBAIKAN: begitu proses tarik data PERTAMA KALI dari Google Sheets
+  // selesai (sedangMuatDataAwal berubah dari true -> false, lihat state di
+  // atas), `cmsForm` di-SINKRON ULANG dari `cmsTeks` yang sudah benar -
+  // TAPI HANYA SEKALI (dijaga oleh ref di bawah), supaya tidak menimpa
+  // balik perubahan yang sedang aktif diketik admin kalau efek ini somehow
+  // terpicu lagi di kemudian hari.
+  // =====================================================================
+  const cmsFormSudahDisinkronDariServerRef = useRef(false);
+  useEffect(() => {
+    if (sedangMuatDataAwal) return; // masih proses loading, tunggu dulu
+    if (cmsFormSudahDisinkronDariServerRef.current) return; // sudah pernah sinkron sekali, jangan diulang
+    cmsFormSudahDisinkronDariServerRef.current = true;
+    setCmsForm({
+      ...cmsTeks,
+      syaratText: (cmsTeks.syaratList || []).join('\n'),
+      ketentuanText: (cmsTeks.ketentuanList || []).join('\n'),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sedangMuatDataAwal]);
+
   // PERBAIKAN: kalau user meninggalkan tab/app ini (pindah aplikasi lain,
   // kunci layar HP, dsb) lalu KEMBALI lagi ke tab ini, aplikasi otomatis
   // mengambil ulang seluruh data dari Google Sheet secara diam-diam
@@ -4031,8 +4071,8 @@ export default function IuranWargaRTApp() {
         body: JSON.stringify({
           action: 'gantiPasswordUser',
           userId: activeUserSession.id,
-          passwordLama: formUbahPassword.lama,
-          passwordBaru: formUbahPassword.baru,
+          passwordLama: formUbahPassword.lama.trim(),
+          passwordBaru: formUbahPassword.baru.trim(),
         })
       });
 
@@ -4974,13 +5014,11 @@ export default function IuranWargaRTApp() {
                       <div key={u.id} className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 border border-blue-800 rounded-2xl overflow-hidden flex flex-col shadow-lg shadow-blue-950/30">
                         <div className="w-full h-24 sm:h-28 bg-blue-900/60 flex items-center justify-center overflow-hidden">
                           {u.foto ? (
-                            <img
-                              loading="lazy"
-                              decoding="async"
+                            <GambarZoom
                               src={toDirectImageUrl(u.foto)}
                               alt={u.namaProduk}
                               className="w-full h-full object-cover"
-                              onError={(e) => { e.target.style.display = 'none'; }}
+                              onBuka={bukaLightbox}
                             />
                           ) : (
                             <span className="text-[9px] text-blue-300 font-bold">Belum ada foto produk</span>
