@@ -420,6 +420,12 @@ export default function IuranWargaRTApp() {
       .marquee-wrap { overflow: hidden; white-space: nowrap; }
       .marquee-track { display: inline-flex; width: max-content; animation: marqueeBerjalan 14s linear infinite; }
       .marquee-track span { padding-right: 3rem; }
+      /* PROGRESS BAR ANIMASI di overlay "Menyiapkan data RT..." (loading awal) -
+         gerakan bolak-balik terus-menerus (indeterminate), supaya kelihatan
+         "hidup"/profesional walau durasi tarik data sesungguhnya bervariasi
+         tergantung kecepatan koneksi. */
+      @keyframes loadingBarAnim { 0% { transform: translateX(-100%); width: 40%; } 50% { width: 60%; } 100% { transform: translateX(250%); width: 40%; } }
+      .loading-bar-anim { animation: loadingBarAnim 1.1s ease-in-out infinite; }
       /* GAMBAR BISA DI-ZOOM (KLIK UNTUK LIGHTBOX) - dipakai di semua foto Agenda,
          Agenda Utama, & Informasi Umum RT (Web Utama, akun Warga, akun Bendahara).
          Efek membesar (scale) saat kursor diarahkan HANYA aktif di perangkat yang
@@ -1145,6 +1151,12 @@ export default function IuranWargaRTApp() {
   // Kalau URL belum diisi, aplikasi tetap jalan normal pakai data lokal (mode demo).
   // ==========================================
   const [sheetStatus, setSheetStatus] = useState('idle'); // idle | loading | synced | error
+  // sedangMuatDataAwal: TRUE selama proses tarik data PERTAMA KALI dari
+  // Google Sheets masih berjalan (bukan refresh diam-diam di latar
+  // belakang). Dipakai untuk menampilkan overlay "masih dalam proses" yang
+  // menahan klik apapun di website sampai proses ini beres, supaya warga
+  // tidak salah pencet/salah kira web error padahal cuma masih menarik data.
+  const [sedangMuatDataAwal, setSedangMuatDataAwal] = useState(true);
   // true kalau Google Sheets sudah mengirim data ANGGOTA ASLI (dataAnggota tidak
   // kosong) - dipakai untuk otomatis menyembunyikan tombol "Simulasi Akun
   // Pengguna" di Web Utama begitu website sudah punya data warga sungguhan,
@@ -1450,7 +1462,7 @@ export default function IuranWargaRTApp() {
   // user pindah-pindah tab.
   // ==========================================
   const muatSemuaDataDariSheet = async (sunyi = false) => {
-    if (!cmsTeks.appsScriptUrl) return;
+    if (!cmsTeks.appsScriptUrl) { setSedangMuatDataAwal(false); return; }
     // PERBAIKAN BUG (lihat catatan di pendingSyncCountRef/syncSheet di atas):
     // kalau ini refresh DIAM-DIAM (dipicu balik ke tab/app, bukan klik manual
     // tombol "Refresh Data") DAN masih ada proses simpan (syncSheet) yang
@@ -1556,6 +1568,12 @@ export default function IuranWargaRTApp() {
       console.error(err);
       setSheetStatus('error');
       if (!sunyi) showToast(`Gagal memuat dari Google Sheets: ${err.message}`, 'error');
+    } finally {
+      // Begitu proses tarik data (apa pun hasilnya, berhasil/gagal) SELESAI,
+      // overlay "masih dalam proses" otomatis hilang & website bisa diklik
+      // normal. Aman dipanggil berkali-kali (refresh diam-diam di latar
+      // belakang) karena state ini sudah false sejak load pertama beres.
+      setSedangMuatDataAwal(false);
     }
   };
 
@@ -2357,7 +2375,17 @@ export default function IuranWargaRTApp() {
     const pendingKelompok = anggotaKelompok.reduce((acc, m) => acc + m.pending, 0);
     const sisaKelompok = Math.max(0, targetKelompok - masukKelompok);
     const persenKelompok = targetKelompok > 0 ? Math.min(100, Math.round((masukKelompok / targetKelompok) * 100)) : 0;
-    const anggotaBelumLunas = anggotaKelompok.filter(m => m.sisa > 0);
+    // PERBAIKAN: sebelumnya badge "⚠ N anggota belum lunas" memakai syarat
+    // `m.sisa > 0` saja (sisa target SETAHUN) - akibatnya anggota yang SUDAH
+    // bayar & diverifikasi Bendahara di BULAN BERJALAN (mis. Juli) tetap
+    // dianggap "belum lunas" hanya karena bulan-bulan lain di tahun itu
+    // belum lunas semua. Sekarang badge ini HANYA menghitung anggota yang: (1)
+    // bulan berjalan MASIH belum dibayar (statusBulanIni === 'Belum Bayar'),
+    // DAN (2) juga masih punya tunggakan dari bulan-bulan SEBELUMNYA (sisa
+    // lebih besar dari 1x iuran bulanan, bukan cuma nunggak bulan ini saja).
+    // Kalau bulan berjalan sudah dibayar (walau bulan lain masih ada yang
+    // kosong), anggota TIDAK dihitung di sini lagi.
+    const anggotaBelumLunas = anggotaKelompok.filter(m => m.statusBulanIni === 'Belum Bayar' && m.sisa > IURAN_BULANAN);
     return { ...k, anggotaKelompok, targetKelompok, masukKelompok, pendingKelompok, sisaKelompok, persenKelompok, anggotaBelumLunas };
   });
 
@@ -4281,6 +4309,30 @@ export default function IuranWargaRTApp() {
         rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800;900&family=Roboto:wght@400;500;700;900&display=swap"
       />
+
+      {/* OVERLAY "MASIH DALAM PROSES" - tampil SELAMA proses tarik data
+          PERTAMA KALI dari Google Sheets belum selesai (sedangMuatDataAwal).
+          Menutupi SELURUH halaman (z paling atas) supaya klik apapun di
+          website (tombol, link, menu, dsb) tertahan di sini dulu & memberi
+          tahu warga untuk menunggu, bukan diteruskan ke elemen di
+          bawahnya - mencegah salah pencet/salah kira aplikasi error padahal
+          cuma masih menyinkronkan data. Otomatis hilang begitu data selesai
+          dimuat (lihat finally di muatSemuaDataDariSheet). */}
+      {sedangMuatDataAwal && (
+        <div
+          onClick={() => showToast('Masih dalam proses, tunggu sampai proses completed.', 'error')}
+          className="fixed inset-0 z-[9999] bg-slate-950/50 backdrop-blur-sm flex items-center justify-center px-6 cursor-wait"
+        >
+          <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 border border-blue-800 rounded-2xl px-8 py-7 shadow-2xl max-w-xs w-full text-center">
+            <div className="w-10 h-10 mx-auto mb-4 border-[3px] border-blue-700 border-t-amber-400 rounded-full animate-spin"></div>
+            <p className="text-white font-black text-sm">Menyiapkan data RT...</p>
+            <p className="text-blue-200 text-[11px] mt-1.5 leading-relaxed">Mohon tunggu sebentar, halaman akan bisa diklik begitu proses selesai.</p>
+            <div className="mt-4 h-1.5 w-full bg-blue-900 rounded-full overflow-hidden">
+              <div className="h-full bg-amber-400 rounded-full loading-bar-anim"></div>
+            </div>
+          </div>
+        </div>
+      )}
       {/*
         Gaya global TIDAK lagi dirender lewat elemen <style> di JSX (yang teksnya
         dibandingkan saat hydration dan bisa mismatch di proxy webcontainer/StackBlitz).
@@ -4502,7 +4554,7 @@ export default function IuranWargaRTApp() {
                     rel="noopener noreferrer"
                     className="mt-2 inline-flex items-center gap-1.5 bg-gradient-to-r from-blue-950 via-blue-900 to-blue-950 hover:from-blue-900 hover:via-blue-800 hover:to-blue-900 text-white font-bold text-[11px] px-3 py-1.5 rounded-full transition-colors duration-200"
                   >
-                    💬 Chat via WhatsApp
+                    Chat via WhatsApp
                   </a>
                 </div>
               </div>
@@ -4672,9 +4724,15 @@ export default function IuranWargaRTApp() {
             <div className="col-span-1 space-y-6">
 
               {/* FORM LOGIN RESMI (USERNAME & PASSWORD) */}
-              <div className="bg-white p-6 rounded-3xl border shadow-xs h-fit">
-                <h3 className="text-sm font-black text-slate-900 text-center mb-1">Login Akun Warga / Admin</h3>
-                <p className="text-[10px] text-slate-400 text-center mb-4">Satu form untuk semua akun: warga masuk dengan username &amp; password yang dikirim ke WA saat aktivasi, Panitia/Admin masuk dengan akun Super Admin.</p>
+              <div className="bg-white rounded-3xl border shadow-xs h-fit overflow-hidden">
+                {/* HEADER NAVY GRADASI (senada dengan sidebar) + teks warna menyala
+                    supaya kartu Login lebih menonjol & terlihat konsisten dengan
+                    tema navy di seluruh halaman. */}
+                <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 px-6 py-4">
+                  <h3 className="text-sm font-black text-amber-300 text-center mb-1 drop-shadow-[0_0_6px_rgba(252,211,77,0.5)]">Login Akun Warga / Admin</h3>
+                  <p className="text-[10px] text-blue-200 text-center">Satu form untuk semua akun: warga masuk dengan username &amp; password yang dikirim ke WA saat aktivasi, Panitia/Admin masuk dengan akun Super Admin.</p>
+                </div>
+                <div className="p-6">
                 <form onSubmit={handleLogin} className="space-y-3 text-xs font-semibold">
                   <div><label className="block mb-1 text-slate-600">Username</label><input type="text" required placeholder="hidayat123" value={formLogin.username} onChange={(e) => setFormLogin({...formLogin, username: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                   <div><label className="block mb-1 text-slate-600">Password</label><input type="password" required placeholder="••••••••" value={formLogin.password} onChange={(e) => setFormLogin({...formLogin, password: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
@@ -4682,12 +4740,18 @@ export default function IuranWargaRTApp() {
                   {loginError && <p className="text-[11px] font-bold text-rose-600">{loginError}</p>}
                   <button type="submit" disabled={isLoggingIn} className="w-full bg-emerald-700 text-white font-bold p-2.5 rounded-xl transition-transform duration-150 hover:scale-[1.01] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100">{isLoggingIn ? 'Memuat...' : '🔑 Masuk ke Akun Saya'}</button>
                 </form>
+                </div>
               </div>
 
               {/* FORM PENDAFTARAN */}
-              <div className="bg-white p-6 rounded-3xl border shadow-xs h-fit">
-                <h3 className="text-sm font-black text-slate-900 text-center mb-1">Pendaftaran Akun</h3>
-                <p className="text-[10px] text-slate-400 text-center mb-4">Setelah diaktivasi bendahara, username &amp; password acak akan dikirim ke WA Anda.</p>
+              <div className="bg-white rounded-3xl border shadow-xs h-fit overflow-hidden">
+                {/* HEADER NAVY GRADASI (senada dengan sidebar) + teks warna menyala,
+                    konsisten dengan kartu Login di atasnya. */}
+                <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 px-6 py-4">
+                  <h3 className="text-sm font-black text-amber-300 text-center mb-1 drop-shadow-[0_0_6px_rgba(252,211,77,0.5)]">Pendaftaran Akun</h3>
+                  <p className="text-[10px] text-blue-200 text-center">Setelah diaktivasi bendahara, username &amp; password acak akan dikirim ke WA Anda.</p>
+                </div>
+                <div className="p-6">
                 <form onSubmit={handleUserMendaftar} className="space-y-3 text-xs font-semibold">
                   <div><label className="block mb-1 text-slate-600">Nama Kepala Keluarga</label><input type="text" required placeholder="Hidayat" value={formDaftar.nama} onChange={(e) => handleUbahNamaKepalaKeluarga(e.target.value)} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                   <div>
@@ -4773,6 +4837,7 @@ export default function IuranWargaRTApp() {
                   <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-[11px] text-emerald-800 font-bold text-center">Iuran ini mencakup kebersihan, keamanan, Kas RT</div>
                   <button type="submit" className="w-full bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold p-2.5 rounded-xl">Daftar Sebagai Warga</button>
                 </form>
+                </div>
               </div>
 
               {/* BUKU KAS MASUK/KELUAR RT (TRANSPARANSI PUBLIK - TAMPIL DI BAWAH KARTU PENDAFTARAN AKUN) */}
@@ -4897,7 +4962,13 @@ export default function IuranWargaRTApp() {
               {umkmList.length > 0 && (
                 <div className="bg-white p-6 rounded-3xl border shadow-xs h-fit">
                   <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest text-center mb-1">🛍️ Serba-Serbi UMKM {cmsTeks.namaRT}</h3>
-                  <p className="text-[10px] text-slate-400 text-center mb-4">Dukung usaha warga - klik Chat WhatsApp untuk pesan langsung ke pemilik produk.</p>
+                  <p className="text-[10px] text-slate-400 text-center mb-2">Dukung usaha warga - klik Chat WhatsApp untuk pesan langsung ke pemilik produk.</p>
+                  {/* PROMOSI GRATIS UNTUK WARGA RT 40 RW 08 - mengajak warga yang punya
+                      usaha/produk supaya mau ikut dipajang di galeri UMKM ini, TANPA BIAYA
+                      apapun, cukup hubungi Pengurus RT. */}
+                  <p className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-center font-semibold leading-relaxed mb-4">
+                    📢 Warga RT 40 RW 08 yang ingin produknya ikut dipajang di Web Utama ini bisa langsung hubungi Pengurus RT, <strong>GRATIS tanpa biaya apapun.</strong>
+                  </p>
                   <div className="grid grid-cols-2 gap-3">
                     {umkmList.map(u => (
                       <div key={u.id} className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 border border-blue-800 rounded-2xl overflow-hidden flex flex-col shadow-lg shadow-blue-950/30">
@@ -4927,7 +4998,7 @@ export default function IuranWargaRTApp() {
                               rel="noopener noreferrer"
                               className="mt-2 bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-black text-[9px] text-center py-1.5 rounded-lg tracking-wide transition-colors"
                             >
-                              💬 Chat WhatsApp
+                              Chat WhatsApp
                             </a>
                           ) : (
                             <span className="mt-2 bg-blue-900/60 text-blue-300 font-bold text-[9px] text-center py-1.5 rounded-lg italic">Nomor WA belum diisi</span>
@@ -7071,8 +7142,18 @@ export default function IuranWargaRTApp() {
                                 <div>
                                   <span className="text-sm font-black text-slate-900 block">{m.nama}</span>
                                   <span className="text-slate-400 font-normal">{m.nomorRumah} | Status: <span className={m.statusAnggota === 'Aktif' ? 'text-emerald-700 font-bold' : 'text-rose-500 font-bold'}>{m.statusAnggota}</span></span>
-                                  <span className="text-slate-400 font-normal mt-0.5">
+                                  <span className="text-slate-400 font-normal mt-0.5 flex items-center gap-1.5 flex-wrap">
                                     Username: <span className="font-mono text-slate-700">{m.username}</span>
+                                    <span className="text-slate-300">|</span>
+                                    {/* CATATAN KEAMANAN: Password TIDAK PERNAH dikirim balik oleh backend
+                                        Apps Script (lihat KOLOM_RAHASIA_PER_SHEET & saringKolomRahasia di
+                                        Code.gs) - jadi m.password akan selalu kosong untuk data yang sudah
+                                        pernah ke-refresh dari Google Sheets. Ini SENGAJA (demi keamanan
+                                        warga), sehingga fitur "reveal password" tidak dipasang di sini.
+                                        Kalau admin butuh kasih akses ke warga, pakai tombol "Reset Password"
+                                        di sebelah kanan - password baru otomatis dikirim ke WA warga
+                                        bersangkutan (tidak pernah tampil di layar admin). */}
+                                    <span className="italic text-slate-400">Password tersembunyi demi keamanan - gunakan "Reset Password" untuk kirim ulang ke WA warga</span>
                                   </span>
                                 </div>
                               </div>
