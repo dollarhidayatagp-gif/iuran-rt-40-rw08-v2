@@ -2339,7 +2339,28 @@ export default function IuranWargaRTApp() {
       })
       .filter(r => r.status !== 'LUNAS');
 
-    return { ...m, dibayar, pending, sisa, persen, bulanLunas, statusBulanIni, riwayatBelumLunas };
+    // ==========================================
+    // PERBAIKAN BUG "1 ANGGOTA BELUM LUNAS" PADAHAL BULAN BERJALAN SUDAH
+    // DIBAYAR & DIVERIFIKASI: sebelumnya badge peringatan "⚠ N anggota belum
+    // lunas" (lihat rekapPerNomorPengajuan di bawah) memakai m.sisa > 0, yaitu
+    // SISA TARGET SETAHUN. Akibatnya HAMPIR SEMUA anggota otomatis kebaca
+    // "belum lunas" di awal-awal periode walau bulan berjalannya sendiri
+    // sudah lunas & diverifikasi Bendahara (mis. baru bayar 1 dari 12 bulan
+    // -> sisa masih Rp495.000 -> ikut ditandai "belum lunas" walau bulan ini
+    // sudah beres).
+    //
+    // Sekarang badge HANYA muncul kalau anggota tsb BENAR-BENAR masih ada
+    // yang mengganjal: (a) bulan berjalan MASIH pending/belum dibayar sampai
+    // saat ini, DAN/ATAU (b) ada tunggakan nyata dari periode sebelumnya yang
+    // sudah ditutup Admin & belum lunas. Kalau bulan berjalan sudah "Sudah
+    // Bayar" (LUNAS & diverifikasi) DAN tidak ada tunggakan nyata, anggota
+    // TIDAK dianggap "belum lunas" lagi - walau sisa target setahun masih
+    // ada (itu wajar, bukan tanda menunggak).
+    // ==========================================
+    const tunggakanBelumLunasMember = m.pengurus ? [] : tunggakanList.filter(t => t.userNama === m.nama && t.status !== 'LUNAS');
+    const perluPeringatanBelumLunas = !m.pengurus && (statusBulanIni !== 'Sudah Bayar' || tunggakanBelumLunasMember.length > 0);
+
+    return { ...m, dibayar, pending, sisa, persen, bulanLunas, statusBulanIni, riwayatBelumLunas, tunggakanBelumLunasMember, perluPeringatanBelumLunas };
   });
 
   // ==========================================
@@ -2357,7 +2378,7 @@ export default function IuranWargaRTApp() {
     const pendingKelompok = anggotaKelompok.reduce((acc, m) => acc + m.pending, 0);
     const sisaKelompok = Math.max(0, targetKelompok - masukKelompok);
     const persenKelompok = targetKelompok > 0 ? Math.min(100, Math.round((masukKelompok / targetKelompok) * 100)) : 0;
-    const anggotaBelumLunas = anggotaKelompok.filter(m => m.sisa > 0);
+    const anggotaBelumLunas = anggotaKelompok.filter(m => m.perluPeringatanBelumLunas);
     return { ...k, anggotaKelompok, targetKelompok, masukKelompok, pendingKelompok, sisaKelompok, persenKelompok, anggotaBelumLunas };
   });
 
@@ -4264,6 +4285,38 @@ export default function IuranWargaRTApp() {
     </div>
   );
 
+  // ==========================================
+  // BUKA "WEB UTAMA" DARI TOMBOL NAVIGASI
+  // -----------------------------------------------------------
+  // Setiap kali tombol nav "Web Utama" diklik, langsung picu tarik-ulang data
+  // dari Google Sheet SAAT ITU JUGA (bukan menunggu efek lain), supaya jeda
+  // antara klik & data benar-benar termuat sesingkat mungkin (kelihatan
+  // profesional/cepat). Selama proses tarik data ini berjalan, seluruh klik
+  // di halaman Web Utama akan ditahan oleh guard di bawah sampai statusnya
+  // "Proses Completed."
+  // ==========================================
+  const handleBukaWebUtama = () => {
+    setView('landing');
+    if (cmsTeks.appsScriptUrl) muatSemuaDataDariSheet(false);
+  };
+
+  // ==========================================
+  // GUARD KLIK WEB UTAMA SELAMA PROSES TARIK DATA BELUM COMPLETED
+  // -----------------------------------------------------------
+  // Selama sheetStatus masih "loading" (data dari Google Sheet belum selesai
+  // ditarik/di-sync, alias belum muncul toast "Proses Completed."), SEMUA
+  // klik apa pun di halaman Web Utama ditahan di sini (fase capture, sebelum
+  // sampai ke tombol/link aslinya) & diganti dengan pesan peringatan, supaya
+  // pengunjung tidak sempat berinteraksi dengan data yang belum tentu final.
+  // ==========================================
+  const handleLandingClickGuard = (e) => {
+    if (sheetStatus === 'loading') {
+      e.preventDefault();
+      e.stopPropagation();
+      showToast('Masih dalam proses, tunggu sampai proses completed.', 'error');
+    }
+  };
+
   return (
     <div className="app-root bg-slate-50 min-h-screen text-slate-800 antialiased font-sans">
       {/*
@@ -4364,7 +4417,7 @@ export default function IuranWargaRTApp() {
             <>
               <span className="text-slate-400 font-normal">Tampilan:</span>
               <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 p-0.5 rounded-lg border border-slate-800 flex">
-                <button onClick={() => { setView('landing'); }} className={`px-3 py-1 rounded-md text-[11px] ${view === 'landing' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400'}`}>Web Utama</button>
+                <button onClick={handleBukaWebUtama} className={`px-3 py-1 rounded-md text-[11px] ${view === 'landing' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400'}`}>Web Utama</button>
                 <button onClick={() => { setRole('user'); setView('dashboard'); setActiveMenu('dashboard'); }} className={`px-3 py-1 rounded-md text-[11px] ${role === 'user' && view === 'dashboard' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400'}`}>Dashboard Warga</button>
               </div>
             </>
@@ -4372,7 +4425,7 @@ export default function IuranWargaRTApp() {
             <>
               <span className="text-slate-400 font-normal">Tampilan:</span>
               <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 p-0.5 rounded-lg border border-slate-800 flex">
-                <button onClick={() => { setView('landing'); }} className={`px-3 py-1 rounded-md text-[11px] ${view === 'landing' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400'}`}>Web Utama</button>
+                <button onClick={handleBukaWebUtama} className={`px-3 py-1 rounded-md text-[11px] ${view === 'landing' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400'}`}>Web Utama</button>
                 <button onClick={() => { setRole('admin'); setView('dashboard'); setActiveMenu('dashboard'); }} className={`px-3 py-1 rounded-md text-[11px] ${role === 'admin' && view === 'dashboard' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400'}`}>Admin Panel</button>
               </div>
               <button onClick={handleAdminLogout} className="text-[10px] font-bold text-slate-500 hover:text-rose-400 underline underline-offset-2 ml-1">Keluar Admin</button>
@@ -4385,7 +4438,13 @@ export default function IuranWargaRTApp() {
           VIEW 1: LANDING PAGE / WEBSITE UTAMA
           ========================================================================= */}
       {view === 'landing' && (
-        <div className="max-w-6xl mx-auto px-4 py-8 space-y-6 anim-fade">
+        <div className="max-w-6xl mx-auto px-4 py-8 space-y-6 anim-fade" onClickCapture={handleLandingClickGuard}>
+          {sheetStatus === 'loading' && cmsTeks.appsScriptUrl && (
+            <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[999] bg-slate-900 text-white text-[11px] font-bold px-4 py-2 rounded-full shadow-lg flex items-center gap-2">
+              <span className="inline-block w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin"></span>
+              Masih dalam proses, tunggu sampai proses completed...
+            </div>
+          )}
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white px-5 sm:px-8 py-4 rounded-2xl shadow-xs border">
             <div className="flex items-center gap-3 w-full sm:w-auto">
               {cmsTeks.logoRT ? (
@@ -4502,7 +4561,7 @@ export default function IuranWargaRTApp() {
                     rel="noopener noreferrer"
                     className="mt-2 inline-flex items-center gap-1.5 bg-gradient-to-r from-blue-950 via-blue-900 to-blue-950 hover:from-blue-900 hover:via-blue-800 hover:to-blue-900 text-white font-bold text-[11px] px-3 py-1.5 rounded-full transition-colors duration-200"
                   >
-                    💬 Chat via WhatsApp
+                    Chat via WhatsApp
                   </a>
                 </div>
               </div>
@@ -4672,10 +4731,12 @@ export default function IuranWargaRTApp() {
             <div className="col-span-1 space-y-6">
 
               {/* FORM LOGIN RESMI (USERNAME & PASSWORD) */}
-              <div className="bg-white p-6 rounded-3xl border shadow-xs h-fit">
-                <h3 className="text-sm font-black text-slate-900 text-center mb-1">Login Akun Warga / Admin</h3>
-                <p className="text-[10px] text-slate-400 text-center mb-4">Satu form untuk semua akun: warga masuk dengan username &amp; password yang dikirim ke WA saat aktivasi, Panitia/Admin masuk dengan akun Super Admin.</p>
-                <form onSubmit={handleLogin} className="space-y-3 text-xs font-semibold">
+              <div className="bg-white rounded-3xl border shadow-xs h-fit overflow-hidden">
+                <div className="bg-emerald-700 px-6 py-4">
+                  <h3 className="text-sm font-black text-white text-center mb-1">Login Akun Warga / Admin</h3>
+                  <p className="text-[10px] text-emerald-50 text-center font-semibold">Satu form untuk semua akun: warga masuk dengan username &amp; password yang dikirim ke WA saat aktivasi, Panitia/Admin masuk dengan akun Super Admin.</p>
+                </div>
+                <form onSubmit={handleLogin} className="space-y-3 text-xs font-semibold p-6">
                   <div><label className="block mb-1 text-slate-600">Username</label><input type="text" required placeholder="hidayat123" value={formLogin.username} onChange={(e) => setFormLogin({...formLogin, username: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                   <div><label className="block mb-1 text-slate-600">Password</label><input type="password" required placeholder="••••••••" value={formLogin.password} onChange={(e) => setFormLogin({...formLogin, password: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                   {isLoggingIn && <p className="text-[11px] font-bold text-amber-600 flex items-center gap-1.5"><span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></span>Memuat data dari server, mohon tunggu...</p>}
@@ -4685,10 +4746,12 @@ export default function IuranWargaRTApp() {
               </div>
 
               {/* FORM PENDAFTARAN */}
-              <div className="bg-white p-6 rounded-3xl border shadow-xs h-fit">
-                <h3 className="text-sm font-black text-slate-900 text-center mb-1">Pendaftaran Akun</h3>
-                <p className="text-[10px] text-slate-400 text-center mb-4">Setelah diaktivasi bendahara, username &amp; password acak akan dikirim ke WA Anda.</p>
-                <form onSubmit={handleUserMendaftar} className="space-y-3 text-xs font-semibold">
+              <div className="bg-white rounded-3xl border shadow-xs h-fit overflow-hidden">
+                <div className="bg-emerald-700 px-6 py-4">
+                  <h3 className="text-sm font-black text-white text-center mb-1">Pendaftaran Akun</h3>
+                  <p className="text-[10px] text-emerald-50 text-center font-semibold">Setelah diaktivasi bendahara, username &amp; password acak akan dikirim ke WA Anda.</p>
+                </div>
+                <form onSubmit={handleUserMendaftar} className="space-y-3 text-xs font-semibold p-6">
                   <div><label className="block mb-1 text-slate-600">Nama Kepala Keluarga</label><input type="text" required placeholder="Hidayat" value={formDaftar.nama} onChange={(e) => handleUbahNamaKepalaKeluarga(e.target.value)} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
                   <div>
                     <label className="block mb-1 text-slate-600">Status Rumah</label>
@@ -4897,7 +4960,8 @@ export default function IuranWargaRTApp() {
               {umkmList.length > 0 && (
                 <div className="bg-white p-6 rounded-3xl border shadow-xs h-fit">
                   <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest text-center mb-1">🛍️ Serba-Serbi UMKM {cmsTeks.namaRT}</h3>
-                  <p className="text-[10px] text-slate-400 text-center mb-4">Dukung usaha warga - klik Chat WhatsApp untuk pesan langsung ke pemilik produk.</p>
+                  <p className="text-[10px] text-slate-400 text-center mb-2">Dukung usaha warga - klik Chat WhatsApp untuk pesan langsung ke pemilik produk.</p>
+                  <p className="text-[10px] text-emerald-700 font-bold text-center mb-4 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">📢 Warga {cmsTeks.namaRT} yang ingin produk usahanya ditampilkan di Web Utama ini bisa langsung menghubungi Pengurus - <span className="underline">GRATIS, tanpa biaya apapun.</span></p>
                   <div className="grid grid-cols-2 gap-3">
                     {umkmList.map(u => (
                       <div key={u.id} className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 border border-blue-800 rounded-2xl overflow-hidden flex flex-col shadow-lg shadow-blue-950/30">
@@ -4927,7 +4991,7 @@ export default function IuranWargaRTApp() {
                               rel="noopener noreferrer"
                               className="mt-2 bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-black text-[9px] text-center py-1.5 rounded-lg tracking-wide transition-colors"
                             >
-                              💬 Chat WhatsApp
+                              Chat WhatsApp
                             </a>
                           ) : (
                             <span className="mt-2 bg-blue-900/60 text-blue-300 font-bold text-[9px] text-center py-1.5 rounded-lg italic">Nomor WA belum diisi</span>
@@ -5985,7 +6049,7 @@ export default function IuranWargaRTApp() {
                                           <td className="py-1.5 pr-2 text-rose-500">Rp {m.sisa.toLocaleString('id-ID')}</td>
                                           <td className="py-1.5 pr-2">
                                             {m.statusBulanIni === 'Sudah Bayar' ? (
-                                              <span className="text-emerald-700 font-black">Sudah Bayar</span>
+                                              <span className="text-emerald-700 font-black">Done</span>
                                             ) : m.statusBulanIni === 'Menunggu Verifikasi' ? (
                                               <span className="text-amber-600 font-black">Menunggu Verifikasi</span>
                                             ) : (
@@ -7071,8 +7135,15 @@ export default function IuranWargaRTApp() {
                                 <div>
                                   <span className="text-sm font-black text-slate-900 block">{m.nama}</span>
                                   <span className="text-slate-400 font-normal">{m.nomorRumah} | Status: <span className={m.statusAnggota === 'Aktif' ? 'text-emerald-700 font-bold' : 'text-rose-500 font-bold'}>{m.statusAnggota}</span></span>
-                                  <span className="text-slate-400 font-normal mt-0.5">
-                                    Username: <span className="font-mono text-slate-700">{m.username}</span>
+                                  <span className="text-slate-400 font-normal mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                    <span>Username: <span className="font-mono text-slate-700">{m.username}</span></span>
+                                    <span className="text-slate-300">|</span>
+                                    <span className="flex items-center gap-1">
+                                      Password: <span className="font-mono text-slate-700">{visiblePasswordIds.includes(m.id) ? (m.password || '-') : '••••••••'}</span>
+                                      <button type="button" onClick={() => togglePasswordVisibility(m.id)} className="text-slate-400 hover:text-emerald-700" title={visiblePasswordIds.includes(m.id) ? 'Sembunyikan Password' : 'Lihat Password'}>
+                                        {visiblePasswordIds.includes(m.id) ? '🙈' : '👁️'}
+                                      </button>
+                                    </span>
                                   </span>
                                 </div>
                               </div>
