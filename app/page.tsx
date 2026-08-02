@@ -2178,6 +2178,11 @@ export default function IuranWargaRTApp() {
   // server (Google Sheets). Mengantisipasi warga mengira web "gagal/error"
   // padahal sebenarnya cuma masih menunggu respons server (koneksi lambat dsb).
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  // isDaftarLoading: form Pendaftaran Akun sedang proses submit (menunggu
+  // verifikasi server) - dipakai untuk kunci tombol "Daftar Sebagai Warga"
+  // supaya tidak bisa diklik dua kali berturut-turut (double submit), yang
+  // dulu jadi salah satu penyebab 2 akun bisa nyangkut di 1 nomor rumah.
+  const [isDaftarLoading, setIsDaftarLoading] = useState(false);
 
   // ==========================================
   // LOGIN ADMIN/PANITIA (TERPISAH DARI LOGIN WARGA)
@@ -3843,8 +3848,9 @@ export default function IuranWargaRTApp() {
     showToast('Agenda utama dihapus dari Beranda.', 'error');
   };
 
-  const handleUserMendaftar = (e) => {
+  const handleUserMendaftar = async (e) => {
     e.preventDefault();
+    if (isDaftarLoading) return; // sudah ada proses submit berjalan, jangan proses lagi (anti double-submit)
     if (!formDaftar.blokRumah || !formDaftar.nomorRumahUnit) {
       showToast('Blok Rumah dan Nomor Rumah wajib dipilih.', 'error');
       return;
@@ -3852,23 +3858,31 @@ export default function IuranWargaRTApp() {
     // ==========================================
     // KUNCI PENDAFTARAN GANDA (SATU BLOK + NOMOR RUMAH = SATU AKUN)
     // -----------------------------------------------------------
-    // Dicek terhadap DUA sumber: (1) `members` -> akun yang sudah aktif, dan
+    // LAPISAN 1 (cepat, di browser): dicek dulu terhadap DUA sumber yang ada
+    // di memori saat ini: (1) `members` -> akun yang sudah aktif, dan
     // (2) `pengajuanBaru` -> pendaftaran lain yang masih menunggu aktivasi
-    // admin, supaya tidak ada dua pendaftaran nyangkut di Blok & Nomor Rumah
-    // yang sama sekalipun belum di-ACC admin. Kalau kombinasi Blok + Nomor
-    // Rumah yang dipilih sudah dipakai, pendaftaran DITOLAK & warga diarahkan
-    // menghubungi admin/pengurus RT untuk perubahan data (bukan didaftarkan
-    // ulang jadi akun baru).
+    // admin. Ini kasih feedback INSTAN ke warga tanpa perlu tunggu server.
     // PENGECUALIAN: kalau akun LAMA di Blok & Nomor Rumah itu sudah di-set
     // "Pasif" oleh admin (mis. penghuni lama sudah pindah/tidak aktif),
     // kunci ini OTOMATIS TERBUKA - warga baru/pengganti di alamat yang sama
     // tetap boleh mendaftar seperti biasa.
+    //
+    // LAPISAN 2 (pasti, di server - lihat prosesDaftarWargaBaru di Code.gs):
+    // PERBAIKAN BUG - dua warga PERNAH lolos daftar di Blok+Nomor Rumah yang
+    // SAMA karena keduanya submit HAMPIR BERSAMAAN, sebelum salah satu
+    // pendaftaran sempat "terlihat" oleh browser yang satunya (race
+    // condition khas validasi client-only). Makanya submit akhir SEKARANG
+    // WAJIB lewat server (kalau Google Sheets sudah tersambung), yang
+    // memakai LockService supaya permintaan diproses SATU PER SATU secara
+    // berurutan & selalu membaca data TERBARU langsung dari Sheet - jadi
+    // walau dua orang klik "Daftar" persis bersamaan, yang kedua akan
+    // tetap ditolak dengan benar.
     // ==========================================
     const nomorRumahGabunganCek = `Blok ${formDaftar.blokRumah} No. ${formDaftar.nomorRumahUnit}`;
     const sudahAdaAkunAktif = members.some(m => (m.nomorRumah || '').trim().toLowerCase() === nomorRumahGabunganCek.trim().toLowerCase() && m.statusAnggota !== 'Pasif');
     const sudahAdaPengajuanLain = pengajuanBaru.some(r => (r.nomorRumah || '').trim().toLowerCase() === nomorRumahGabunganCek.trim().toLowerCase());
     if (sudahAdaAkunAktif || sudahAdaPengajuanLain) {
-      showToast(`${nomorRumahGabunganCek} sudah terdaftar${sudahAdaAkunAktif ? ' dan memiliki akun aktif' : ', sedang menunggu aktivasi'}. Silakan hubungi admin/pengurus RT untuk perubahan data.`, 'error');
+      showToast(`Blok dan nomor rumah sudah ada, silakan hubungi Pengurus RT untuk aktivasinya.`, 'error');
       return;
     }
     if (!formDaftar.alamat.trim()) {
@@ -3894,11 +3908,39 @@ export default function IuranWargaRTApp() {
       }
     }
     const nomorRumahGabungan = nomorRumahGabunganCek;
-    updatePengajuan([...pengajuanBaru, {
+    const dataPendaftaran = {
       id: 'REQ-' + Math.floor(100 + Math.random() * 900),
       nama: formDaftar.nama, nomorRumah: nomorRumahGabungan, email: formDaftar.email, wa: formDaftar.wa, alamat: formDaftar.alamat, target: TARGET_TAHUNAN, tglDaftar: '11 Jul 2026',
       statusRumah: formDaftar.statusRumah, anggotaKeluarga: formDaftar.anggotaKeluarga
-    }]);
+    };
+
+    // LAPISAN 2: verifikasi & simpan lewat server (kalau Google Sheets sudah
+    // tersambung) supaya aman dari race condition. Kalau BELUM tersambung
+    // (mode demo/lokal), tetap lanjut simpan ke state lokal seperti biasa.
+    if (cmsTeks.appsScriptUrl) {
+      setIsDaftarLoading(true);
+      try {
+        const hasil = await sheetFetch(cmsTeks.appsScriptUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'daftarWargaBaru',
+            data: { ...dataPendaftaran, anggotaKeluarga: JSON.stringify(dataPendaftaran.anggotaKeluarga) },
+          })
+        });
+        if (!hasil || hasil.error) {
+          showToast((hasil && hasil.error) || 'Gagal mendaftar, silakan coba lagi.', 'error');
+          return;
+        }
+      } catch (err) {
+        showToast('Gagal menghubungi server, cek koneksi internet Anda.', 'error');
+        return;
+      } finally {
+        setIsDaftarLoading(false);
+      }
+    }
+
+    updatePengajuan([...pengajuanBaru, dataPendaftaran]);
     tambahNotifikasi({
       untuk: 'admin',
       judul: 'Pendaftaran Member Baru',
@@ -4758,6 +4800,64 @@ export default function IuranWargaRTApp() {
                 </div>
               </div>
 
+              {/* SERBA-SERBI UMKM RT (DIKELOLA ADMIN DARI CMS SUPER EDITOR)
+                  DIPINDAH ke kolom KIRI, tepat di bawah kartu "Informasi Umum RT"
+                  (di bawah jam/waktu & running text-nya) - supaya sekelompok
+                  dengan info publik RT lainnya, bukan bercampur dengan kolom
+                  Login/Pendaftaran. Terlihat oleh SEMUA akun (belum login, warga,
+                  maupun admin lain). Khusus tampilan LAPTOP/desktop (lg+), setiap
+                  kartu dibuat LANDSCAPE (foto di kiri, teks & tombol di kanan)
+                  supaya lebih hemat tempat vertikal & enak dipindai matanya;
+                  di HP tetap disusun vertikal (foto di atas) seperti biasa. */}
+              {umkmList.length > 0 && (
+                <div className="bg-white p-6 rounded-3xl border shadow-xs h-fit">
+                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest text-center mb-1">🛍️ Serba-Serbi UMKM {cmsTeks.namaRT}</h3>
+                  <p className="text-[10px] text-slate-400 text-center mb-2">Dukung usaha warga - klik Chat WhatsApp untuk pesan langsung ke pemilik produk.</p>
+                  {/* PROMOSI GRATIS UNTUK WARGA RT 40 RW 08 - mengajak warga yang punya
+                      usaha/produk supaya mau ikut dipajang di galeri UMKM ini, TANPA BIAYA
+                      apapun, cukup hubungi Pengurus RT. */}
+                  <p className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-center font-semibold leading-relaxed mb-4">
+                    📢 Warga RT 40 RW 08 yang ingin produknya ikut dipajang di Web Utama ini bisa langsung hubungi Pengurus RT, <strong>GRATIS tanpa biaya apapun.</strong>
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {umkmList.map(u => (
+                      <div key={u.id} className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 border border-blue-800 rounded-2xl overflow-hidden flex flex-col lg:flex-row shadow-lg shadow-blue-950/30">
+                        <div className="w-full h-24 sm:h-28 lg:w-2/5 lg:h-auto shrink-0 bg-blue-900/60 flex items-center justify-center overflow-hidden">
+                          {u.foto ? (
+                            <GambarZoom
+                              src={toDirectImageUrl(u.foto)}
+                              alt={u.namaProduk}
+                              className="w-full h-full object-cover"
+                              onBuka={bukaLightbox}
+                            />
+                          ) : (
+                            <span className="text-[9px] text-blue-300 font-bold">Belum ada foto produk</span>
+                          )}
+                        </div>
+                        <div className="p-2.5 flex-1 flex flex-col">
+                          <p className="text-amber-300 font-black text-[11px] leading-tight drop-shadow-[0_0_6px_rgba(252,211,77,0.55)]">{u.namaProduk}</p>
+                          {u.deskripsi && (
+                            <p className="text-blue-200 text-[9px] font-semibold leading-snug mt-1 flex-1">{u.deskripsi}</p>
+                          )}
+                          {u.noWa ? (
+                            <a
+                              href={`${buatLinkWhatsapp(u.noWa)}?text=${encodeURIComponent(`Halo, saya lihat produk "${u.namaProduk}" di Web Utama ${cmsTeks.namaRT}. Apakah masih tersedia?`)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-2 bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-black text-[9px] text-center py-1.5 rounded-lg tracking-wide transition-colors"
+                            >
+                              Chat WhatsApp
+                            </a>
+                          ) : (
+                            <span className="mt-2 bg-blue-900/60 text-blue-300 font-bold text-[9px] text-center py-1.5 rounded-lg italic">Nomor WA belum diisi</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
             </div>
 
             {/* KOLOM KANAN: LOGIN, PENDAFTARAN, & INFO MOTIVASI WARGA */}
@@ -4875,7 +4975,7 @@ export default function IuranWargaRTApp() {
                   </div>
 
                   <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-[11px] text-emerald-800 font-bold text-center">Iuran ini mencakup kebersihan, keamanan, Kas RT</div>
-                  <button type="submit" className="w-full bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold p-2.5 rounded-xl">Daftar Sebagai Warga</button>
+                  <button type="submit" disabled={isDaftarLoading} className="w-full bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold p-2.5 rounded-xl disabled:opacity-60 disabled:cursor-not-allowed">{isDaftarLoading ? 'Memeriksa & mendaftarkan...' : 'Daftar Sebagai Warga'}</button>
                 </form>
                 </div>
               </div>
@@ -4986,62 +5086,6 @@ export default function IuranWargaRTApp() {
                         </div>
                         <p className="font-black text-slate-900 leading-tight">{d.nama}</p>
                         <p className="text-[9px] font-bold text-emerald-700 uppercase tracking-wide mt-0.5">{d.jabatan}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* SERBA-SERBI UMKM RT (DIKELOLA ADMIN DARI CMS SUPER EDITOR)
-                  Ruang promosi UMKM warga di bawah kartu Struktur Pengurus RT,
-                  terlihat oleh SEMUA akun (belum login, warga, maupun admin lain).
-                  Background navy gradasi (bukan oranye) dengan teks warna menyala,
-                  setiap kartu ada foto produk, nama & deskripsi produk, serta
-                  tombol Chat WhatsApp yang langsung terkoneksi ke nomor WA
-                  pemilik produk masing-masing untuk mendukung UMKM RT. */}
-              {umkmList.length > 0 && (
-                <div className="bg-white p-6 rounded-3xl border shadow-xs h-fit">
-                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest text-center mb-1">🛍️ Serba-Serbi UMKM {cmsTeks.namaRT}</h3>
-                  <p className="text-[10px] text-slate-400 text-center mb-2">Dukung usaha warga - klik Chat WhatsApp untuk pesan langsung ke pemilik produk.</p>
-                  {/* PROMOSI GRATIS UNTUK WARGA RT 40 RW 08 - mengajak warga yang punya
-                      usaha/produk supaya mau ikut dipajang di galeri UMKM ini, TANPA BIAYA
-                      apapun, cukup hubungi Pengurus RT. */}
-                  <p className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-center font-semibold leading-relaxed mb-4">
-                    📢 Warga RT 40 RW 08 yang ingin produknya ikut dipajang di Web Utama ini bisa langsung hubungi Pengurus RT, <strong>GRATIS tanpa biaya apapun.</strong>
-                  </p>
-                  <div className="grid grid-cols-2 gap-3">
-                    {umkmList.map(u => (
-                      <div key={u.id} className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 border border-blue-800 rounded-2xl overflow-hidden flex flex-col shadow-lg shadow-blue-950/30">
-                        <div className="w-full h-24 sm:h-28 bg-blue-900/60 flex items-center justify-center overflow-hidden">
-                          {u.foto ? (
-                            <GambarZoom
-                              src={toDirectImageUrl(u.foto)}
-                              alt={u.namaProduk}
-                              className="w-full h-full object-cover"
-                              onBuka={bukaLightbox}
-                            />
-                          ) : (
-                            <span className="text-[9px] text-blue-300 font-bold">Belum ada foto produk</span>
-                          )}
-                        </div>
-                        <div className="p-2.5 flex-1 flex flex-col">
-                          <p className="text-amber-300 font-black text-[11px] leading-tight drop-shadow-[0_0_6px_rgba(252,211,77,0.55)]">{u.namaProduk}</p>
-                          {u.deskripsi && (
-                            <p className="text-blue-200 text-[9px] font-semibold leading-snug mt-1 flex-1">{u.deskripsi}</p>
-                          )}
-                          {u.noWa ? (
-                            <a
-                              href={`${buatLinkWhatsapp(u.noWa)}?text=${encodeURIComponent(`Halo, saya lihat produk "${u.namaProduk}" di Web Utama ${cmsTeks.namaRT}. Apakah masih tersedia?`)}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="mt-2 bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-black text-[9px] text-center py-1.5 rounded-lg tracking-wide transition-colors"
-                            >
-                              Chat WhatsApp
-                            </a>
-                          ) : (
-                            <span className="mt-2 bg-blue-900/60 text-blue-300 font-bold text-[9px] text-center py-1.5 rounded-lg italic">Nomor WA belum diisi</span>
-                          )}
-                        </div>
                       </div>
                     ))}
                   </div>
@@ -5792,12 +5836,18 @@ export default function IuranWargaRTApp() {
                                     </td>
                                     <td className="py-2.5 pr-2"><BadgeStatus status={t.status} /></td>
                                     <td className="py-2.5 pr-2 text-right">
-                                      {t.status === 'BELUM BAYAR' && (
-                                        <label className="bg-gradient-to-br from-rose-700 via-rose-800 to-rose-900 text-white px-3 py-1.5 rounded-lg text-[10px] transition-transform hover:scale-[1.03] cursor-pointer whitespace-nowrap inline-block">
-                                          Lunasi / Upload Bukti
-                                          <input type="file" accept="image/*,.pdf" className="hidden" onChange={(e) => handleUploadBayar(e, t.bulanNama, inputBayar.tanggal, inputBayar.nominal, t.id)} />
-                                        </label>
-                                      )}
+                                      {t.status === 'BELUM BAYAR' && (() => {
+                                        const belumLengkap = !inputBayar.tanggal || !inputBayar.nominal || Number(inputBayar.nominal) <= 0;
+                                        return (
+                                          <label
+                                            title={belumLengkap ? 'Isi Tanggal Bayar & Nominal terlebih dahulu' : 'Klik untuk pilih file bukti transfer'}
+                                            className={`px-3 py-1.5 rounded-lg text-[10px] transition-transform whitespace-nowrap inline-block ${belumLengkap ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-gradient-to-br from-rose-700 via-rose-800 to-rose-900 text-white hover:scale-[1.03] cursor-pointer'}`}
+                                          >
+                                            Lunasi / Upload Bukti
+                                            <input type="file" accept="image/*,.pdf" disabled={belumLengkap} className="hidden" onChange={(e) => handleUploadBayar(e, t.bulanNama, inputBayar.tanggal, inputBayar.nominal, t.id)} />
+                                          </label>
+                                        );
+                                      })()}
                                       {t.status === 'MENUNGGU VERIFIKASI' && (
                                         <span className="text-amber-600 text-[10px] font-bold whitespace-nowrap">Menunggu Bendahara</span>
                                       )}
@@ -5872,12 +5922,25 @@ export default function IuranWargaRTApp() {
                                         tidak "geser" antar baris walau salah satu slot kosong. */}
                                     <div className="flex justify-end items-center gap-1.5">
                                       <div className="min-w-[126px] flex justify-end">
-                                        {status === 'BELUM BAYAR' && (
-                                          <label className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white px-3 py-1.5 rounded-lg text-[10px] transition-transform hover:scale-[1.03] cursor-pointer whitespace-nowrap">
-                                            Upload Bukti
-                                            <input type="file" accept="image/*,.pdf" className="hidden" onChange={(e) => handleUploadBayar(e, bln.nama, inputBayar.tanggal, inputBayar.nominal)} />
-                                          </label>
-                                        )}
+                                        {status === 'BELUM BAYAR' && (() => {
+                                          // KUNCI TOMBOL UPLOAD: sebelumnya warga bisa langsung buka
+                                          // file picker & pilih file walau kolom "Tanggal Bayar" masih
+                                          // kosong - baru ditolak SETELAH pilih file (toast error, harus
+                                          // ulang). Sekarang tombol "Upload Bukti" otomatis TERKUNCI
+                                          // (abu-abu, tidak bisa diklik) SEBELUM Tanggal Bayar & Nominal
+                                          // diisi dengan benar, supaya warga tahu dulu apa yang kurang
+                                          // tanpa perlu buka file picker berkali-kali.
+                                          const belumLengkap = !inputBayar.tanggal || !inputBayar.nominal || Number(inputBayar.nominal) <= 0;
+                                          return (
+                                            <label
+                                              title={belumLengkap ? 'Isi Tanggal Bayar & Nominal terlebih dahulu' : 'Klik untuk pilih file bukti transfer'}
+                                              className={`px-3 py-1.5 rounded-lg text-[10px] transition-transform whitespace-nowrap ${belumLengkap ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white hover:scale-[1.03] cursor-pointer'}`}
+                                            >
+                                              Upload Bukti
+                                              <input type="file" accept="image/*,.pdf" disabled={belumLengkap} className="hidden" onChange={(e) => handleUploadBayar(e, bln.nama, inputBayar.tanggal, inputBayar.nominal)} />
+                                            </label>
+                                          );
+                                        })()}
                                         {status === 'MENUNGGU VERIFIKASI' && (
                                           <span className="text-amber-600 text-[10px] font-bold whitespace-nowrap">Menunggu Bendahara</span>
                                         )}
