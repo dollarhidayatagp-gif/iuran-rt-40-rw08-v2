@@ -383,8 +383,12 @@ function useTrenPengunjung(totalPengunjung) {
 // 'https://script.google.com/macros/s/xxxxxxxxxxxxx/exec'
 const DEFAULT_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwr2SnfxwirNXy1MKn9gy4GmT-oPkEMfP2QKirB2csLT5rGOUQXHHSVVg-xla6uShxb/exec';
 // Kunci rahasia aplikasi - HARUS SAMA PERSIS dengan APP_SECRET di Code.gs.
-// 'tes123' hanya untuk testing awal, WAJIB diganti sebelum di-share ke warga.
-const APP_SECRET = 'tes123';
+// SUDAH DIGANTI dari 'tes123' (testing) ke string acak yang panjang & sulit
+// ditebak, sesuai rekomendasi keamanan sebelum aplikasi dipublish ke warga.
+// PENTING: kalau suatu saat mau ganti lagi, WAJIB update juga nilai yang
+// SAMA PERSIS di APP_SECRET pada Code.gs, lalu Deploy ulang (New version) -
+// kalau tidak sama persis, semua login & permintaan data akan ditolak server.
+const APP_SECRET = 'ISFWkod0HCqvYLZkVsIeZquIGt82sQYeRoHtBKLa';
 
 export default function IuranWargaRTApp() {
   // ==========================================
@@ -1481,6 +1485,26 @@ export default function IuranWargaRTApp() {
       const semua = await sheetFetch(`${cmsTeks.appsScriptUrl}?action=getAll`);
       if (semua && semua.error) throw new Error(semua.error);
 
+      // PERBAIKAN BUG "kadang item yang sudah di-approve/aktivasi muncul lagi
+      // seolah belum diproses" (Pending Iuran, Member Baru, dsb):
+      // -----------------------------------------------------------
+      // Pengecekan `pendingSyncCountRef` di ATAS (sebelum request GET ini
+      // dikirim) TERNYATA tidak cukup - ada celah waktu: kalau ADMIN KLIK
+      // "Setujui/Aktivasi" TEPAT SAAT request GET diam-diam ini SEDANG
+      // BERJALAN (request GET sudah terlanjur dikirim SEBELUM klik admin),
+      // maka begitu GET ini selesai, ia akan membawa data LAMA (dari SEBELUM
+      // proses persetujuan) dan MENIMPA BALIK state lokal yang baru saja
+      // diperbarui - membuat item yang sudah disetujui "muncul lagi" seolah
+      // masih pending, padahal sebenarnya sudah tersimpan benar di server.
+      // PERBAIKAN: cek ULANG di sini (SETELAH GET selesai, SEBELUM data
+      // diterapkan) - kalau ternyata ADA proses simpan yang baru mulai
+      // SELAMA GET ini berjalan, BATALKAN penerapan data (basi), biarkan
+      // auto-refresh berikutnya yang mengambil data paling baru.
+      if (sunyi && pendingSyncCountRef.current > 0) {
+        setSedangMuatDataAwal(false);
+        return;
+      }
+
       const dataAnggota = semua.members || [];
       const dataIuran = semua.iuran || [];
       const dataKegiatan = semua.kegiatan || [];
@@ -2036,7 +2060,15 @@ export default function IuranWargaRTApp() {
       const awalan = `Blok ${blok} No.`;
       const anggotaBlokIni = members.filter(m => (m.nomorRumah || '').startsWith(awalan));
       const jumlahKK = anggotaBlokIni.length;
-      const jumlahJiwa = jumlahKK + anggotaBlokIni.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
+      // PERBAIKAN BUG PENGHITUNGAN GANDA: array `anggotaKeluarga` tiap KK
+      // SUDAH TERMASUK baris Kepala Keluarga itu sendiri (lihat
+      // ID_BARIS_KEPALA_KELUARGA - baris pertama & terkunci di form
+      // Pendaftaran/Anggota Keluarga, hubungan: "Kepala Keluarga"). Jadi
+      // `jumlahJiwa` yang benar = jumlah SELURUH baris anggotaKeluarga saja
+      // (bukan jumlahKK DITAMBAH jumlah anggotaKeluarga lagi, yang tanpa
+      // sadar menghitung tiap Kepala Keluarga 2x: sekali sebagai KK, sekali
+      // lagi sebagai baris pertama di anggotaKeluarga-nya sendiri).
+      const jumlahJiwa = anggotaBlokIni.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
       return { blok, jumlahKK, jumlahJiwa };
     });
   };
@@ -2227,6 +2259,11 @@ export default function IuranWargaRTApp() {
   // PANEL KONTROL ANGGOTA - CENTANG UNTUK AKSI MASSAL
   // ==========================================
   const [selectedMemberIds, setSelectedMemberIds] = useState([]);
+  // passwordTerlihat: menyimpan password yang SEDANG DITAMPILKAN oleh admin
+  // (fitur "Lihat Password" di Panel Kontrol Anggota) - key = id anggota,
+  // value = password (string) atau 'memuat' selagi proses ambil dari
+  // server. Default kosong = semua password tersembunyi (••••••••).
+  const [passwordTerlihat, setPasswordTerlihat] = useState({});
 
   // ==========================================
   // SHOW/HIDE PASSWORD (ADMIN) - AKSES PENUH ADMIN
@@ -4044,6 +4081,49 @@ export default function IuranWargaRTApp() {
     }
   };
 
+  // ==========================================
+  // ADMIN: LIHAT PASSWORD 1 ANGGOTA (fitur "Lihat Password")
+  // -----------------------------------------------------------
+  // Berbeda dengan Reset Password (bikin password BARU), fitur ini
+  // menampilkan password anggota yang SUDAH ADA saat ini, tanpa
+  // mengubahnya - jadi admin tidak perlu reset kalau cuma mau intip/
+  // konfirmasi password warga. Memanggil server (action getPasswordAnggota)
+  // karena backend Apps Script SENGAJA tidak pernah mengirim kolom password
+  // lewat endpoint biasa (demi keamanan) - lihat KOLOM_RAHASIA_PER_SHEET.
+  // ==========================================
+  const handleLihatPassword = async (memberId) => {
+    // Toggle: kalau sudah kebuka, tutup lagi tanpa perlu panggil server ulang.
+    if (passwordTerlihat[memberId] !== undefined) {
+      setPasswordTerlihat(prev => {
+        const next = { ...prev };
+        delete next[memberId];
+        return next;
+      });
+      return;
+    }
+    if (!cmsTeks.appsScriptUrl) {
+      showToast('Google Sheets belum tersambung, tidak bisa mengambil password dari server.', 'error');
+      return;
+    }
+    setPasswordTerlihat(prev => ({ ...prev, [memberId]: 'memuat' }));
+    try {
+      const hasil = await sheetFetch(cmsTeks.appsScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'getPasswordAnggota', userId: memberId })
+      });
+      if (!hasil || hasil.error) {
+        showToast((hasil && hasil.error) || 'Gagal mengambil password.', 'error');
+        setPasswordTerlihat(prev => { const next = { ...prev }; delete next[memberId]; return next; });
+        return;
+      }
+      setPasswordTerlihat(prev => ({ ...prev, [memberId]: hasil.password || '(kosong)' }));
+    } catch (err) {
+      showToast('Gagal menghubungi server, cek koneksi internet Anda.', 'error');
+      setPasswordTerlihat(prev => { const next = { ...prev }; delete next[memberId]; return next; });
+    }
+  };
+
   // MANAJEMEN AKSES WARGA (ADMIN <-> USER) OLEH ADMIN
   // Admin memilih tingkat akses tiap warga: 'admin' = akses penuh (setara Admin Panel),
   // 'user' = akses terbatas (hanya Dashboard Warga). Contoh: mengubah akses "Hidayat".
@@ -5257,7 +5337,18 @@ export default function IuranWargaRTApp() {
               const dataWarga = dataWargaSemua.filter(m => m.statusAnggota !== 'Pasif');
               const totalKK = dataWarga.length;
               const totalAnggotaKeluarga = dataWarga.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
-              const totalJiwa = totalKK + totalAnggotaKeluarga;
+              // PERBAIKAN BUG PENGHITUNGAN GANDA "Total Jiwa" vs "Laki-laki +
+              // Perempuan" vs "Berdasarkan Usia" TIDAK NYAMBUNG (mis. 37+30=67
+              // tapi Total Jiwa tertulis 90): array `anggotaKeluarga` tiap KK
+              // SUDAH TERMASUK baris Kepala Keluarga itu sendiri (baris pertama
+              // & terkunci, hubungan: "Kepala Keluarga", diisi saat Pendaftaran).
+              // Jadi Total Jiwa yang benar = jumlah SELURUH baris anggotaKeluarga
+              // saja, TANPA ditambah totalKK lagi (dulu setiap KK tanpa sadar
+              // dihitung 2x: sekali sebagai "KK", sekali lagi sebagai baris
+              // pertama di anggotaKeluarga miliknya sendiri). Dengan begini,
+              // Total Jiwa sekarang otomatis SAMA PERSIS dengan penjumlahan
+              // Laki-laki+Perempuan & rekap Berdasarkan Usia di bawahnya.
+              const totalJiwa = totalAnggotaKeluarga;
               const jmlMilikSendiri = dataWarga.filter(m => m.statusRumah === 'Milik Sendiri').length;
               const jmlKontrak = dataWarga.filter(m => m.statusRumah !== 'Milik Sendiri').length;
               const jmlAktif = dataWargaSemua.filter(m => m.statusAnggota === 'Aktif').length;
@@ -5273,7 +5364,9 @@ export default function IuranWargaRTApp() {
               const perBlokSemua = (isSimulatedSession ? KELOMPOK_DUMMY_INFORMASI_WARGA : kelompokList).map(k => {
                 const anggotaBlokIni = dataWarga.filter(m => cocokBlok(m.kelompok, k.nama));
                 const jumlahKK = anggotaBlokIni.length;
-                const jumlahJiwa = jumlahKK + anggotaBlokIni.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
+                // (lihat catatan perbaikan double-count di atas) - anggotaKeluarga
+                // tiap KK sudah termasuk baris KK itu sendiri.
+                const jumlahJiwa = anggotaBlokIni.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
                 return { ...k, jumlahKK, jumlahJiwa };
               });
               // Distribusi Warga per Blok: SEMUA blok ditampilkan baik untuk Admin
@@ -6378,7 +6471,8 @@ export default function IuranWargaRTApp() {
                       // keluarga sendiri, supaya warga bisa lihat data seluruh RT.
                       const anggotaKelompok = anggotaSemuaUntukTampil.filter(m => cocokBlok(m.kelompok, k.nama));
                       const rekapUsia = getRekapKategoriUsia(anggotaKelompok);
-                      const totalJiwa = anggotaKelompok.length + anggotaKelompok.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
+                      // (lihat catatan perbaikan double-count di getRingkasanBlokRumah)
+                      const totalJiwa = anggotaKelompok.reduce((acc, m) => acc + (m.anggotaKeluarga || []).length, 0);
                       // BLOK RUMAH MU: khusus akun user (bukan admin), blok yang SAMA
                       // dengan blok tempat tinggalnya sendiri (activeUserSession.kelompok)
                       // ditandai beda - gradasi biru navy + label "Blok Rumah Mu", supaya
@@ -7246,15 +7340,17 @@ export default function IuranWargaRTApp() {
                                   <span className="text-slate-400 font-normal mt-0.5 flex items-center gap-1.5 flex-wrap">
                                     Username: <span className="font-mono text-slate-700">{m.username}</span>
                                     <span className="text-slate-300">|</span>
-                                    {/* CATATAN KEAMANAN: Password TIDAK PERNAH dikirim balik oleh backend
-                                        Apps Script (lihat KOLOM_RAHASIA_PER_SHEET & saringKolomRahasia di
-                                        Code.gs) - jadi m.password akan selalu kosong untuk data yang sudah
-                                        pernah ke-refresh dari Google Sheets. Ini SENGAJA (demi keamanan
-                                        warga), sehingga fitur "reveal password" tidak dipasang di sini.
-                                        Kalau admin butuh kasih akses ke warga, pakai tombol "Reset Password"
-                                        di sebelah kanan - password baru otomatis dikirim ke WA warga
-                                        bersangkutan (tidak pernah tampil di layar admin). */}
-                                    <span className="italic text-slate-400">Password tersembunyi demi keamanan - gunakan "Reset Password" untuk kirim ulang ke WA warga</span>
+                                    Password: <span className="font-mono text-slate-700">
+                                      {passwordTerlihat[m.id] === 'memuat' ? 'memuat...' : (passwordTerlihat[m.id] !== undefined ? passwordTerlihat[m.id] : '••••••••')}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleLihatPassword(m.id)}
+                                      disabled={passwordTerlihat[m.id] === 'memuat'}
+                                      className="text-emerald-700 font-bold underline underline-offset-2 text-[10px] disabled:opacity-50"
+                                    >
+                                      {passwordTerlihat[m.id] !== undefined ? '🙈 Sembunyikan' : '👁️ Lihat Password'}
+                                    </button>
                                   </span>
                                 </div>
                               </div>
