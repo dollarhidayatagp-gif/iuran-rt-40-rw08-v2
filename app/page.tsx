@@ -1135,6 +1135,15 @@ export default function IuranWargaRTApp() {
   // tabel "Rekap Per Anggota (Monitoring)" - menampilkan histori 12 bulan
   // periode berjalan yang masih belum lunas/open untuk anggota tsb.
   const [expandedRekapAnggotaId, setExpandedRekapAnggotaId] = useState(null);
+  // PENCARIAN & SORT untuk tabel "Rekap Per Anggota (Monitoring)":
+  // - cariRekapAnggota: ketik nama ATAU nomor rumah/blok (mis. "F3", "no 20",
+  //   "dollar") untuk menyaring baris yang tampil, real-time tanpa perlu klik apa pun.
+  // - sortRekapAnggotaBlok: kalau true, tabel diurutkan RAPI per Blok (F3 No.
+  //   1, F3 No. 2, ..., F4 No. 1, dst - urut alfabet blok dulu lalu urut
+  //   ANGKA nomor rumahnya, bukan urut teks biasa supaya "No. 2" tidak
+  //   nyasar setelah "No. 19").
+  const [cariRekapAnggota, setCariRekapAnggota] = useState('');
+  const [sortRekapAnggotaBlok, setSortRekapAnggotaBlok] = useState(false);
   // FILTER BULAN DI DASHBOARD UTAMA (ADMIN) - 'Semua' (default) = kartu Total
   // Kas Global & Sisa Tagihan tetap tampil akumulasi sepanjang periode
   // berjalan seperti biasa. Kalau admin pilih bulan tertentu (mis. id=1 utk
@@ -1428,6 +1437,43 @@ export default function IuranWargaRTApp() {
   const cocokBlok = (a, b) => {
     if (a === undefined || a === null || b === undefined || b === null) return false;
     return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+  };
+
+  // ==========================================
+  // URUTAN "PER BLOK" YANG RAPI (F3 No. 1, F3 No. 2, ..., F3 No. 19, F3
+  // No. 20, lalu F4 No. 1, dst) UNTUK TABEL REKAP PER ANGGOTA (MONITORING)
+  // -----------------------------------------------------------
+  // Kalau nomorRumah cuma diurutkan sebagai TEKS biasa (localeCompare/sort
+  // alfabet), hasilnya salah: "F3 No. 19" akan muncul SEBELUM "F3 No. 2"
+  // (karena karakter '1' < '2' secara teks), padahal Blok F3 No. 2 mestinya
+  // duluan. Fungsi ini memecah nomorRumah jadi 3 bagian yang dibandingkan
+  // terpisah: (1) nama blok [huruf+angka blok, mis. "F3"/"G4"] diurutkan
+  // alfabet, (2) nomor rumah [angka setelah "No."] diurutkan sebagai ANGKA
+  // (bukan teks), supaya urutannya benar-benar 1, 2, 3, ... 19, 20 dst.
+  // Data yang formatnya tidak sesuai pola "Blok X No. Y" (mis. data lama/
+  // custom) tetap aman, otomatis ditaruh paling akhir memakai teks asli.
+  // ==========================================
+  const parseKunciUrutBlok = (nomorRumah) => {
+    const teks = String(nomorRumah || '').trim();
+    const cocok = teks.match(/blok\s+([a-z]+)\s*(\d*)\s*no\.?\s*(\d+)/i);
+    if (!cocok) return { valid: false, blokHuruf: '', blokAngka: 0, nomor: 0, asli: teks };
+    return {
+      valid: true,
+      blokHuruf: cocok[1].toUpperCase(),
+      blokAngka: cocok[2] ? parseInt(cocok[2], 10) : 0,
+      nomor: parseInt(cocok[3], 10) || 0,
+      asli: teks,
+    };
+  };
+  const bandingkanUrutBlok = (nomorA, nomorB) => {
+    const a = parseKunciUrutBlok(nomorA);
+    const b = parseKunciUrutBlok(nomorB);
+    // Data yang formatnya tidak dikenali ditaruh paling belakang.
+    if (a.valid !== b.valid) return a.valid ? -1 : 1;
+    if (!a.valid && !b.valid) return a.asli.localeCompare(b.asli);
+    if (a.blokHuruf !== b.blokHuruf) return a.blokHuruf.localeCompare(b.blokHuruf);
+    if (a.blokAngka !== b.blokAngka) return a.blokAngka - b.blokAngka;
+    return a.nomor - b.nomor;
   };
 
   const uploadFotoKeDrive = async (file, folder = 'Umum') => {
@@ -2213,6 +2259,12 @@ export default function IuranWargaRTApp() {
   // status "Menyimpan..." begitu diklik, dan baru dibuka lagi setelah proses
   // (berhasil ataupun gagal) benar-benar selesai.
   const [sedangSimpanPassword, setSedangSimpanPassword] = useState(false);
+  // lihatFormUbahPassword: menampilkan/menyembunyikan isi ketikan tiap kolom
+  // password di form "Ubah Password" (ikon mata) - key = 'lama' | 'baru' |
+  // 'konfirmasi', value = true kalau sedang ditampilkan sebagai teks biasa.
+  // Murni tampilan lokal di layar warga sendiri, tidak dikirim/disimpan
+  // ke mana pun.
+  const [lihatFormUbahPassword, setLihatFormUbahPassword] = useState({ lama: false, baru: false, konfirmasi: false });
 
   // ==========================================
   // FORM LOGIN RESMI (USERNAME & PASSWORD) - WEB UTAMA
@@ -2462,6 +2514,30 @@ export default function IuranWargaRTApp() {
 
     return { ...m, dibayar, pending, sisa, persen, bulanLunas, statusBulanIni, riwayatBelumLunas };
   });
+
+  // ==========================================
+  // TAMPILAN TABEL "REKAP PER ANGGOTA (MONITORING)" SETELAH DIFILTER
+  // PENCARIAN (nama ATAU nomor rumah/blok) DAN/ATAU DIURUTKAN PER BLOK.
+  // -----------------------------------------------------------
+  // Pencarian dibuat toleran: mengabaikan besar/kecil huruf & boleh cocok
+  // di NAMA atau di NOMOR RUMAH/BLOK sekaligus, jadi admin bisa mengetik
+  // "F3", "no 20", atau nama warga dan tetap ketemu.
+  // ==========================================
+  const rekapPerAnggotaTampil = (() => {
+    let hasil = rekapPerAnggota;
+    const kataKunci = cariRekapAnggota.trim().toLowerCase();
+    if (kataKunci) {
+      hasil = hasil.filter(m =>
+        (m.nama || '').toLowerCase().includes(kataKunci) ||
+        (m.nomorRumah || '').toLowerCase().includes(kataKunci) ||
+        (m.kelompok || '').toLowerCase().includes(kataKunci)
+      );
+    }
+    if (sortRekapAnggotaBlok) {
+      hasil = hasil.slice().sort((a, b) => bandingkanUrutBlok(a.nomorRumah || a.nama, b.nomorRumah || b.nama));
+    }
+    return hasil;
+  })();
 
   // ==========================================
   // REKAP DANA MASUK PER NOMOR PENGAJUAN KELOMPOK (UTK SUMMARY + DRILL-DOWN)
@@ -6396,10 +6472,26 @@ export default function IuranWargaRTApp() {
 
                     {/* REKAPAN PER NAMA UNTUK MONITORING */}
                     <div className="bg-white p-6 rounded-2xl border shadow-xs">
-                      <div className="flex justify-between items-center border-b pb-3 mb-4">
+                      <div className="flex justify-between items-center flex-wrap gap-2 border-b pb-3 mb-4">
                         <div>
                           <h4 className="text-xs font-extrabold text-slate-900 uppercase">Rekap Per Anggota (Monitoring)</h4>
                           <p className="text-[11px] text-slate-400 mt-0.5">Ringkasan capaian tiap warga dalam satu tabel untuk memudahkan pemantauan.</p>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] font-bold">
+                          <input
+                            type="text"
+                            value={cariRekapAnggota}
+                            onChange={(e) => setCariRekapAnggota(e.target.value)}
+                            placeholder="Cari nama / blok / no rumah..."
+                            className="border p-2 rounded-xl bg-slate-50 text-slate-800 font-semibold w-52"
+                          />
+                          <button
+                            onClick={() => setSortRekapAnggotaBlok(v => !v)}
+                            className={`border p-2 rounded-xl whitespace-nowrap ${sortRekapAnggotaBlok ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-slate-50 text-slate-700'}`}
+                            title="Urutkan rapi per Blok (F3 No.1, F3 No.2, ... F4 No.1, dst)"
+                          >
+                            Sort Per Blok {sortRekapAnggotaBlok ? '✓' : ''}
+                          </button>
                         </div>
                       </div>
                       <div className="overflow-x-auto max-h-96 overflow-y-auto">
@@ -6418,7 +6510,7 @@ export default function IuranWargaRTApp() {
                             </tr>
                           </thead>
                           <tbody>
-                            {rekapPerAnggota.map(m => (
+                            {rekapPerAnggotaTampil.map(m => (
                               <React.Fragment key={m.id}>
                               <tr className="border-b last:border-0 hover:bg-slate-50 transition-colors">
                                 <td className="py-2.5 pr-2 text-slate-900 font-black">{m.nama}</td>
@@ -6492,8 +6584,8 @@ export default function IuranWargaRTApp() {
                               )}
                               </React.Fragment>
                             ))}
-                            {rekapPerAnggota.length === 0 && (
-                              <tr><td colSpan={9} className="py-4 text-center text-slate-400 italic">Belum ada data anggota.</td></tr>
+                            {rekapPerAnggotaTampil.length === 0 && (
+                              <tr><td colSpan={9} className="py-4 text-center text-slate-400 italic">{cariRekapAnggota.trim() ? 'Tidak ada warga yang cocok dengan pencarian.' : 'Belum ada data anggota.'}</td></tr>
                             )}
                           </tbody>
                         </table>
@@ -6968,15 +7060,81 @@ export default function IuranWargaRTApp() {
                 <form onSubmit={handleUserGantiPassword} className="space-y-3 text-xs font-semibold">
                   <div>
                     <label className="block mb-1 text-slate-600">Password Lama</label>
-                    <input type="password" required disabled={sedangSimpanPassword} value={formUbahPassword.lama} onChange={(e) => setFormUbahPassword({...formUbahPassword, lama: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed" />
+                    <div className="relative">
+                      <input
+                        type={lihatFormUbahPassword.lama ? 'text' : 'password'}
+                        required
+                        disabled={sedangSimpanPassword}
+                        value={formUbahPassword.lama}
+                        onChange={(e) => setFormUbahPassword({...formUbahPassword, lama: e.target.value})}
+                        className="w-full border p-2 pr-10 rounded-xl bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setLihatFormUbahPassword(prev => ({ ...prev, lama: !prev.lama }))}
+                        tabIndex={-1}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        title={lihatFormUbahPassword.lama ? 'Sembunyikan password' : 'Lihat password'}
+                      >
+                        {lihatFormUbahPassword.lama ? (
+                          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3.28 2.22a.75.75 0 00-1.06 1.06l14.5 14.5a.75.75 0 101.06-1.06l-1.745-1.745a10.29 10.29 0 003.296-4.163.75.75 0 000-.552C17.897 6.045 14.42 3.25 10 3.25a9.72 9.72 0 00-4.522 1.114L3.28 2.22zM7.53 6.47l1.35 1.35a2.5 2.5 0 013.3 3.3l1.35 1.35a4 4 0 00-6-6zM3.09 6.09a10.28 10.28 0 00-2.303 3.535.75.75 0 000 .552C2.104 13.955 5.58 16.75 10 16.75c1.132 0 2.21-.183 3.203-.52l-1.703-1.702a4 4 0 01-5.278-5.278L3.09 6.089z" clipRule="evenodd" /></svg>
+                        ) : (
+                          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path d="M10 3.25c-4.42 0-7.897 2.796-9.196 6.66a.75.75 0 000 .552C2.104 13.955 5.58 16.75 10 16.75s7.897-2.796 9.196-6.66a.75.75 0 000-.552C17.897 6.045 14.42 3.25 10 3.25zM10 13.5a3.25 3.25 0 110-6.5 3.25 3.25 0 010 6.5z" /></svg>
+                        )}
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="block mb-1 text-slate-600">Password Baru</label>
-                    <input type="password" required disabled={sedangSimpanPassword} value={formUbahPassword.baru} onChange={(e) => setFormUbahPassword({...formUbahPassword, baru: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed" />
+                    <div className="relative">
+                      <input
+                        type={lihatFormUbahPassword.baru ? 'text' : 'password'}
+                        required
+                        disabled={sedangSimpanPassword}
+                        value={formUbahPassword.baru}
+                        onChange={(e) => setFormUbahPassword({...formUbahPassword, baru: e.target.value})}
+                        className="w-full border p-2 pr-10 rounded-xl bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setLihatFormUbahPassword(prev => ({ ...prev, baru: !prev.baru }))}
+                        tabIndex={-1}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        title={lihatFormUbahPassword.baru ? 'Sembunyikan password' : 'Lihat password'}
+                      >
+                        {lihatFormUbahPassword.baru ? (
+                          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3.28 2.22a.75.75 0 00-1.06 1.06l14.5 14.5a.75.75 0 101.06-1.06l-1.745-1.745a10.29 10.29 0 003.296-4.163.75.75 0 000-.552C17.897 6.045 14.42 3.25 10 3.25a9.72 9.72 0 00-4.522 1.114L3.28 2.22zM7.53 6.47l1.35 1.35a2.5 2.5 0 013.3 3.3l1.35 1.35a4 4 0 00-6-6zM3.09 6.09a10.28 10.28 0 00-2.303 3.535.75.75 0 000 .552C2.104 13.955 5.58 16.75 10 16.75c1.132 0 2.21-.183 3.203-.52l-1.703-1.702a4 4 0 01-5.278-5.278L3.09 6.089z" clipRule="evenodd" /></svg>
+                        ) : (
+                          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path d="M10 3.25c-4.42 0-7.897 2.796-9.196 6.66a.75.75 0 000 .552C2.104 13.955 5.58 16.75 10 16.75s7.897-2.796 9.196-6.66a.75.75 0 000-.552C17.897 6.045 14.42 3.25 10 3.25zM10 13.5a3.25 3.25 0 110-6.5 3.25 3.25 0 010 6.5z" /></svg>
+                        )}
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="block mb-1 text-slate-600">Konfirmasi Password Baru</label>
-                    <input type="password" required disabled={sedangSimpanPassword} value={formUbahPassword.konfirmasi} onChange={(e) => setFormUbahPassword({...formUbahPassword, konfirmasi: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed" />
+                    <div className="relative">
+                      <input
+                        type={lihatFormUbahPassword.konfirmasi ? 'text' : 'password'}
+                        required
+                        disabled={sedangSimpanPassword}
+                        value={formUbahPassword.konfirmasi}
+                        onChange={(e) => setFormUbahPassword({...formUbahPassword, konfirmasi: e.target.value})}
+                        className="w-full border p-2 pr-10 rounded-xl bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setLihatFormUbahPassword(prev => ({ ...prev, konfirmasi: !prev.konfirmasi }))}
+                        tabIndex={-1}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        title={lihatFormUbahPassword.konfirmasi ? 'Sembunyikan password' : 'Lihat password'}
+                      >
+                        {lihatFormUbahPassword.konfirmasi ? (
+                          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3.28 2.22a.75.75 0 00-1.06 1.06l14.5 14.5a.75.75 0 101.06-1.06l-1.745-1.745a10.29 10.29 0 003.296-4.163.75.75 0 000-.552C17.897 6.045 14.42 3.25 10 3.25a9.72 9.72 0 00-4.522 1.114L3.28 2.22zM7.53 6.47l1.35 1.35a2.5 2.5 0 013.3 3.3l1.35 1.35a4 4 0 00-6-6zM3.09 6.09a10.28 10.28 0 00-2.303 3.535.75.75 0 000 .552C2.104 13.955 5.58 16.75 10 16.75c1.132 0 2.21-.183 3.203-.52l-1.703-1.702a4 4 0 01-5.278-5.278L3.09 6.089z" clipRule="evenodd" /></svg>
+                        ) : (
+                          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path d="M10 3.25c-4.42 0-7.897 2.796-9.196 6.66a.75.75 0 000 .552C2.104 13.955 5.58 16.75 10 16.75s7.897-2.796 9.196-6.66a.75.75 0 000-.552C17.897 6.045 14.42 3.25 10 3.25zM10 13.5a3.25 3.25 0 110-6.5 3.25 3.25 0 010 6.5z" /></svg>
+                        )}
+                      </button>
+                    </div>
                   </div>
                   {passwordMsg.teks && (
                     <p className={`text-[11px] font-bold ${passwordMsg.tipe === 'error' ? 'text-rose-600' : 'text-emerald-700'}`}>{passwordMsg.teks}</p>
