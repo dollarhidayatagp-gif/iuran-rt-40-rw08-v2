@@ -2199,6 +2199,20 @@ export default function IuranWargaRTApp() {
   // FORM UBAH PASSWORD (USER)
   const [formUbahPassword, setFormUbahPassword] = useState({ lama: '', baru: '', konfirmasi: '' });
   const [passwordMsg, setPasswordMsg] = useState({ tipe: '', teks: '' });
+  // PERBAIKAN BUG "Ubah Password": sebelumnya tombol "Simpan Password Baru"
+  // tidak dikunci selama proses ke server berjalan -> kalau warga tidak
+  // sabar/koneksi lambat lalu KLIK BERKALI-KALI, beberapa REQUEST GANTI
+  // PASSWORD terkirim BERSAMAAN. Request pertama bisa saja SUKSES mengganti
+  // password lama -> password baru, tapi request kedua/ketiga yang masih
+  // memakai "Password Lama" versi SEBELUM diganti otomatis DITOLAK server
+  // (dianggap salah), padahal yang diketik warga sebenarnya benar. Ini juga
+  // salah satu penyebab pesan/tampilan yang muncul kadang tidak konsisten
+  // (pesan sukses dari request pertama bisa tertimpa pesan gagal dari
+  // request susulan yang baru selesai belakangan).
+  // SOLUSI: `sedangSimpanPassword` mengunci tombol (disabled) + menampilkan
+  // status "Menyimpan..." begitu diklik, dan baru dibuka lagi setelah proses
+  // (berhasil ataupun gagal) benar-benar selesai.
+  const [sedangSimpanPassword, setSedangSimpanPassword] = useState(false);
 
   // ==========================================
   // FORM LOGIN RESMI (USERNAME & PASSWORD) - WEB UTAMA
@@ -2264,6 +2278,13 @@ export default function IuranWargaRTApp() {
   // value = password (string) atau 'memuat' selagi proses ambil dari
   // server. Default kosong = semua password tersembunyi (••••••••).
   const [passwordTerlihat, setPasswordTerlihat] = useState({});
+  // sedangResetPassword: menandai anggota (id) yang tombol "Reset Password"-nya
+  // SEDANG diproses - dipakai supaya tombol itu terkunci/disabled sesaat
+  // setelah diklik, mencegah admin klik-klik cepat berkali-kali pada baris
+  // yang sama (yang sebelumnya bisa memicu beberapa proses reset & pengiriman
+  // WA/Email SEKALIGUS untuk warga yang sama, membuat data yang tampil
+  // sempat tidak sinkron/tertukar sesaat dengan proses reset baris lain).
+  const [sedangResetPassword, setSedangResetPassword] = useState({});
 
   // ==========================================
   // SHOW/HIDE PASSWORD (ADMIN) - AKSES PENUH ADMIN
@@ -4048,11 +4069,21 @@ export default function IuranWargaRTApp() {
   };
 
   // RESET PASSWORD OLEH ADMIN (PER ANGGOTA)
+  // PERBAIKAN: dikunci per-baris (sedangResetPassword[memberId]) supaya kalau
+  // admin klik "Reset Password" berkali-kali dengan cepat pada warga yang
+  // sama (mis. koneksi lambat & dikira belum ke-klik), tidak memicu beberapa
+  // proses reset SEKALIGUS untuk 1 warga yang sama - yang sebelumnya bisa
+  // bikin beberapa password baru berbeda dibuat berurutan lalu WA/Email
+  // terkirim tidak konsisten (isi pesan/nama yang tampil terasa "tertukar")
+  // karena proses simpan ke Sheet & pengiriman notifikasi saling menyusul.
   const handleAdminResetPassword = (memberId) => {
+    if (sedangResetPassword[memberId]) return;
     const target = members.find(m => m.id === memberId);
     if (!target) return;
     const ok = window.confirm(`Reset password untuk ${target.nama}? Password baru akan dikirim ke WA warga.`);
     if (!ok) return;
+
+    setSedangResetPassword(prev => ({ ...prev, [memberId]: true }));
     const passwordBaru = generateRandomPassword();
     const updated = members.map(m => m.id === memberId ? { ...m, password: passwordBaru } : m);
     updateMembers(updated);
@@ -4079,6 +4110,13 @@ export default function IuranWargaRTApp() {
     if (target.wa) {
       kirimWaOtomatis(target.wa, `Assalamu'alaikum ${target.nama},\nPassword akun Iuran Warga *${cmsTeks.namaRT}* Anda telah *DIRESET* oleh Bendahara.\n\nUsername: ${target.username}\nPassword baru: ${passwordBaru}\n\nSegera login & ganti password Anda demi keamanan. Terima kasih.`);
     }
+    showToast(`Password untuk ${target.nama} berhasil direset & dikirim.`);
+    // Buka kunci tombol ini lagi setelah proses simpan ke Sheet (syncSheet di
+    // dalam updateMembers) diberi jeda singkat untuk mulai berjalan - dibuka
+    // via pendingSyncCountRef supaya konsisten dengan status "sedang sinkron".
+    setTimeout(() => {
+      setSedangResetPassword(prev => { const next = { ...prev }; delete next[memberId]; return next; });
+    }, 1200);
   };
 
   // ==========================================
@@ -4171,6 +4209,16 @@ export default function IuranWargaRTApp() {
   // overwrite tabel penuh, jadi tidak mengganggu data warga lain).
   const handleUserGantiPassword = async (e) => {
     e.preventDefault();
+
+    // PERBAIKAN: kalau proses sebelumnya masih berjalan (misal warga sudah
+    // klik "Simpan Password Baru" lalu klik lagi karena dikira belum
+    // ke-klik/loading terasa lama), ABAIKAN klik susulan ini sepenuhnya.
+    // Ini mencegah 2+ request "gantiPasswordUser" terkirim bersamaan yang
+    // bisa membuat request kedua ditolak server dengan alasan "password
+    // lama salah" (padahal password lama sudah keburu berubah oleh request
+    // pertama yang sukses lebih dulu).
+    if (sedangSimpanPassword) return;
+
     setPasswordMsg({ tipe: '', teks: '' });
 
     if (formUbahPassword.baru.length < 6) {
@@ -4185,6 +4233,16 @@ export default function IuranWargaRTApp() {
       setPasswordMsg({ tipe: 'error', teks: 'Google Sheets belum tersambung.' });
       return;
     }
+
+    setSedangSimpanPassword(true);
+    // Ikut menaikkan `pendingSyncCountRef` (mekanisme yang sama dipakai oleh
+    // syncSheet, lihat catatan di atas) supaya auto-refresh DIAM-DIAM yang
+    // jalan di latar belakang (pindah tab/kembali ke app) TIDAK menimpa
+    // state sesi/akun aktif SELAGI proses ganti password ini masih
+    // berlangsung - ini penyebab tulisan/nama akun yang tampil bisa
+    // "berkedip" berubah sesaat (mis. dari akun A sempat terlihat data B)
+    // kalau auto-refresh kebetulan jalan tepat di waktu yang sama.
+    pendingSyncCountRef.current += 1;
 
     try {
       const hasil = await sheetFetch(cmsTeks.appsScriptUrl, {
@@ -4207,6 +4265,9 @@ export default function IuranWargaRTApp() {
       setPasswordMsg({ tipe: 'sukses', teks: 'Password berhasil diperbarui. Gunakan password baru pada login berikutnya.' });
     } catch (err) {
       setPasswordMsg({ tipe: 'error', teks: 'Gagal menghubungi server, cek koneksi internet.' });
+    } finally {
+      pendingSyncCountRef.current = Math.max(0, pendingSyncCountRef.current - 1);
+      setSedangSimpanPassword(false);
     }
   };
 
@@ -6907,20 +6968,32 @@ export default function IuranWargaRTApp() {
                 <form onSubmit={handleUserGantiPassword} className="space-y-3 text-xs font-semibold">
                   <div>
                     <label className="block mb-1 text-slate-600">Password Lama</label>
-                    <input type="password" required value={formUbahPassword.lama} onChange={(e) => setFormUbahPassword({...formUbahPassword, lama: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" />
+                    <input type="password" required disabled={sedangSimpanPassword} value={formUbahPassword.lama} onChange={(e) => setFormUbahPassword({...formUbahPassword, lama: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed" />
                   </div>
                   <div>
                     <label className="block mb-1 text-slate-600">Password Baru</label>
-                    <input type="password" required value={formUbahPassword.baru} onChange={(e) => setFormUbahPassword({...formUbahPassword, baru: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" />
+                    <input type="password" required disabled={sedangSimpanPassword} value={formUbahPassword.baru} onChange={(e) => setFormUbahPassword({...formUbahPassword, baru: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed" />
                   </div>
                   <div>
                     <label className="block mb-1 text-slate-600">Konfirmasi Password Baru</label>
-                    <input type="password" required value={formUbahPassword.konfirmasi} onChange={(e) => setFormUbahPassword({...formUbahPassword, konfirmasi: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" />
+                    <input type="password" required disabled={sedangSimpanPassword} value={formUbahPassword.konfirmasi} onChange={(e) => setFormUbahPassword({...formUbahPassword, konfirmasi: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed" />
                   </div>
                   {passwordMsg.teks && (
                     <p className={`text-[11px] font-bold ${passwordMsg.tipe === 'error' ? 'text-rose-600' : 'text-emerald-700'}`}>{passwordMsg.teks}</p>
                   )}
-                  <button type="submit" className="w-full bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold p-2.5 rounded-xl">Simpan Password Baru</button>
+                  <button
+                    type="submit"
+                    disabled={sedangSimpanPassword}
+                    className="w-full bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold p-2.5 rounded-xl flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                  >
+                    {sedangSimpanPassword && (
+                      <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                      </svg>
+                    )}
+                    {sedangSimpanPassword ? 'Menyimpan...' : 'Simpan Password Baru'}
+                  </button>
                 </form>
               </div>
             )}
@@ -7360,7 +7433,13 @@ export default function IuranWargaRTApp() {
                                   {kelompokList.map(k => <option key={k.id} value={k.nama}>{k.nama}</option>)}
                                 </select>
                                 <button onClick={() => toggleStatusAnggota(m.id)} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[10px]">Toggle Status</button>
-                                <button onClick={() => handleAdminResetPassword(m.id)} className="bg-rose-600 text-white px-2.5 py-1 rounded text-[10px]">Reset Password</button>
+                                <button
+                                  onClick={() => handleAdminResetPassword(m.id)}
+                                  disabled={!!sedangResetPassword[m.id]}
+                                  className="bg-rose-600 text-white px-2.5 py-1 rounded text-[10px] disabled:opacity-60 disabled:cursor-not-allowed"
+                                >
+                                  {sedangResetPassword[m.id] ? 'Mereset...' : 'Reset Password'}
+                                </button>
                                 {m.statusAnggota === 'Pasif' && (
                                   <button onClick={() => handleHapusMemberPasif(m)} className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded text-[10px] font-black" title="Hapus permanen akun warga Pasif ini">🗑️ Hapus</button>
                                 )}
