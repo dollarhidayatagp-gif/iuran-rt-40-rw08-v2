@@ -1198,6 +1198,44 @@ export default function IuranWargaRTApp() {
     try { return JSON.parse(text); } catch { throw new Error('Respons Apps Script bukan JSON yang valid. Pastikan URL & secret benar, dan deployment "Anyone can access".'); }
   };
 
+  // Jeda sederhana (dalam milidetik) - dipakai untuk auto-retry saat server
+  // (Google Apps Script) sedang sibuk/terkunci proses lain (lihat
+  // sheetFetchDenganRetryLock di bawah).
+  const tunggu = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // ==========================================
+  // PEMBUNGKUS sheetFetch DENGAN AUTO-RETRY KHUSUS UNTUK ERROR "KUNCI"
+  // -----------------------------------------------------------
+  // Backend (Google Apps Script) memakai LockService supaya perubahan yang
+  // menyentuh baris yang sama (mis. ganti password/reset password) tidak
+  // saling tabrakan. Kalau ada 2+ permintaan datang HAMPIR bersamaan (mis.
+  // beberapa warga sama-sama sedang aktif, atau auto-refresh & aksi admin
+  // kebetulan tumpang tindih), salah satu permintaan bisa gagal dengan
+  // pesan "Batas waktu penguncian habis: proses lain menahan kunci terlalu
+  // lama" - ini SEMENTARA (bukan rusak), begitu proses lain selesai
+  // (biasanya dalam hitungan detik), request yang sama biasanya langsung
+  // berhasil kalau dicoba ulang. Daripada warga harus klik manual lagi,
+  // fungsi ini otomatis MENCOBA ULANG beberapa kali dengan jeda singkat
+  // sebelum benar-benar menyerah & menampilkan pesan gagal ke warga.
+  // ==========================================
+  const sheetFetchDenganRetryLock = async (url, options, opts = {}) => {
+    const maxPercobaan = opts.maxPercobaan || 3;
+    const jedaMs = opts.jedaMs || 1500;
+    const onRetry = opts.onRetry; // dipanggil sebelum tiap percobaan ulang, dengan nomor percobaan
+    let percobaanKe = 1;
+    while (true) {
+      const hasil = await sheetFetch(url, options);
+      const pesanError = hasil && hasil.error ? String(hasil.error) : '';
+      const iniErrorKunci = /kunci|lock/i.test(pesanError);
+      if (!iniErrorKunci || percobaanKe >= maxPercobaan) {
+        return hasil;
+      }
+      if (onRetry) onRetry(percobaanKe + 1, maxPercobaan);
+      await tunggu(jedaMs * percobaanKe); // jeda makin lama tiap percobaan (1.5s, 3s, ...)
+      percobaanKe += 1;
+    }
+  };
+
   // ==========================================
   // PERBAIKAN BUG: "data (foto) struktur RT tidak tersimpan padahal sudah
   // diupdate" - PENYEBAB: aplikasi ini auto-refresh data dari Google Sheet
@@ -3835,6 +3873,28 @@ export default function IuranWargaRTApp() {
     showToast('Berhasil keluar dari Admin Panel.');
   };
 
+  // ==========================================
+  // LOGOUT WARGA (AKUN USER)
+  // -----------------------------------------------------------
+  // Berlaku untuk warga yang BENAR-BENAR login (isSimulatedSession false),
+  // bukan yang cuma sedang "coba lihat" lewat Simulasi Akun Pengguna.
+  // Setelah logout: sesi dikembalikan ke mode simulasi (aman, tidak lagi
+  // menampilkan data pribadi warga tsb di layar), dan halaman diarahkan
+  // balik ke Web Utama supaya warga bisa login ulang lewat form Login
+  // kalau perlu.
+  // ==========================================
+  const handleUserLogout = () => {
+    setActiveUserSession(members[0]);
+    setIsSimulatedSession(true);
+    setRole('user');
+    setView('landing');
+    setActiveMenu('dashboard');
+    setFormLogin({ username: '', password: '' });
+    setFormUbahPassword({ lama: '', baru: '', konfirmasi: '' });
+    setPasswordMsg({ tipe: '', teks: '' });
+    showToast('Berhasil keluar dari akun.');
+  };
+
   const handleSaveAdminAccount = (e) => {
     e.preventDefault();
     setAdminAccountMsg({ tipe: '', teks: '' });
@@ -4321,7 +4381,7 @@ export default function IuranWargaRTApp() {
     pendingSyncCountRef.current += 1;
 
     try {
-      const hasil = await sheetFetch(cmsTeks.appsScriptUrl, {
+      const hasil = await sheetFetchDenganRetryLock(cmsTeks.appsScriptUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({
@@ -4330,10 +4390,21 @@ export default function IuranWargaRTApp() {
           passwordLama: formUbahPassword.lama.trim(),
           passwordBaru: formUbahPassword.baru.trim(),
         })
+      }, {
+        maxPercobaan: 3,
+        jedaMs: 1500,
+        onRetry: (ke, total) => setPasswordMsg({ tipe: 'info', teks: `Server sedang sibuk, mencoba lagi... (${ke}/${total})` }),
       });
 
       if (!hasil || hasil.error) {
-        setPasswordMsg({ tipe: 'error', teks: (hasil && hasil.error) || 'Gagal mengganti password.' });
+        const pesanAsli = (hasil && hasil.error) || 'Gagal mengganti password.';
+        const iniErrorKunci = /kunci|lock/i.test(pesanAsli);
+        setPasswordMsg({
+          tipe: 'error',
+          teks: iniErrorKunci
+            ? 'Server sedang sibuk memproses permintaan lain. Silakan tunggu beberapa detik lalu coba "Simpan Password Baru" sekali lagi.'
+            : pesanAsli,
+        });
         return;
       }
 
@@ -5404,6 +5475,15 @@ export default function IuranWargaRTApp() {
                     <button onClick={() => setActiveMenu('informasi-umum')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'informasi-umum' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Informasi Umum</button>
                     <button onClick={() => setActiveMenu('laporan-belanja')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'laporan-belanja' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Laporan Belanja Kas RT</button>
                     <button onClick={() => { setActiveMenu('ubah-password'); setPasswordMsg({ tipe: '', teks: '' }); }} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'ubah-password' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Ubah Password</button>
+                    {!isSimulatedSession && (
+                      <button
+                        onClick={() => { if (window.confirm('Yakin ingin keluar dari akun Anda?')) handleUserLogout(); }}
+                        className="menu-btn w-full text-left px-4 py-3 rounded-xl bg-rose-600/90 text-rose-50 font-bold hover:bg-rose-600 transition-colors duration-150 flex items-center gap-2"
+                      >
+                        <svg className="w-4 h-4 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 4.25A2.25 2.25 0 015.25 2h5.5A2.25 2.25 0 0113 4.25v2a.75.75 0 01-1.5 0v-2a.75.75 0 00-.75-.75h-5.5a.75.75 0 00-.75.75v11.5c0 .414.336.75.75.75h5.5a.75.75 0 00.75-.75v-2a.75.75 0 011.5 0v2A2.25 2.25 0 0110.75 18h-5.5A2.25 2.25 0 013 15.75V4.25z" clipRule="evenodd" /><path fillRule="evenodd" d="M6 10a.75.75 0 01.75-.75h9.19l-2.72-2.72a.75.75 0 111.06-1.06l4 4a.75.75 0 010 1.06l-4 4a.75.75 0 11-1.06-1.06l2.72-2.72H6.75A.75.75 0 016 10z" clipRule="evenodd" /></svg>
+                        Logout
+                      </button>
+                    )}
                   </>
                 )}
 
@@ -7137,7 +7217,7 @@ export default function IuranWargaRTApp() {
                     </div>
                   </div>
                   {passwordMsg.teks && (
-                    <p className={`text-[11px] font-bold ${passwordMsg.tipe === 'error' ? 'text-rose-600' : 'text-emerald-700'}`}>{passwordMsg.teks}</p>
+                    <p className={`text-[11px] font-bold ${passwordMsg.tipe === 'error' ? 'text-rose-600' : passwordMsg.tipe === 'info' ? 'text-amber-600' : 'text-emerald-700'}`}>{passwordMsg.teks}</p>
                   )}
                   <button
                     type="submit"
