@@ -2661,6 +2661,36 @@ export default function IuranWargaRTApp() {
     return pass;
   };
 
+  // ==========================================
+  // PERBAIKAN BUG: GENERATOR ID ANGGOTA BARU (DIJAMIN UNIK)
+  // -----------------------------------------------------------
+  // SEBELUMNYA: id dibuat dengan 'TR-' + Math.floor(10 + Math.random() * 90),
+  // yang cuma punya 80 kemungkinan angka (TR-10 s/d TR-89). Untuk RT dengan
+  // puluhan KK, peluang 2 warga BERBEDA kebagian id yang SAMA PERSIS sangat
+  // tinggi (>90% begitu warga terdaftar sudah 20 orang). Kalau itu terjadi,
+  // SELURUH aksi admin yang mengandalkan id unik (Reset Password, Lihat
+  // Password, Toggle Status, Pindah Kelompok, Hapus Warga, dst - total 13
+  // tempat di kode ini) jadi salah sasaran: klik di baris warga A bisa
+  // ke-apply ke warga B yang kebetulan id-nya sama, dan password salah satu
+  // dari mereka bisa ikut berubah diam-diam tanpa mereka tahu (persis kasus
+  // "reset password muncul nama warga lain" & "password sudah benar tapi
+  // tetap tidak bisa login").
+  // PERBAIKAN: id sekarang digabung dari timestamp (basis-36, hampir pasti
+  // beda tiap kali dipanggil) + angka acak, LALU dicek ulang terhadap semua
+  // id yang sudah ada di `members` - kalau somehow masih bentrok (sangat
+  // kecil kemungkinannya), generate ulang sampai benar-benar unik.
+  // ==========================================
+  const generateUniqueMemberId = (existingMembers) => {
+    const existingIds = new Set((existingMembers || []).map(m => m.id));
+    let id;
+    do {
+      const basisWaktu = Date.now().toString(36).toUpperCase().slice(-5);
+      const acak = Math.floor(100 + Math.random() * 900);
+      id = `TR-${basisWaktu}${acak}`;
+    } while (existingIds.has(id));
+    return id;
+  };
+
   // HELPER: UBAH TANGGAL (ISO "2026-07-11" ATAU FORMAT SINGKAT "11 Jul 2026")
   // MENJADI FORMAT TANGGAL INDONESIA LENGKAP. Contoh: -> '11 Juli 2026'.
   const formatTanggalIndo = (input) => {
@@ -4158,8 +4188,20 @@ export default function IuranWargaRTApp() {
     }
     const aksesTerpilih = pilihanAksesPengajuan[id] || 'user';
     const passwordBaru = generateRandomPassword();
-    const usernameBaru = dataReq.nama.toLowerCase().replace(/\s+/g, '');
-    const idMemberBaru = 'TR-' + Math.floor(10 + Math.random() * 90);
+    // PERBAIKAN BUG TERKAIT: kalau ada 2 warga dgn NAMA SAMA, username
+    // otomatis (nama tanpa spasi) juga bisa kembar -> bisa bikin sistem
+    // login (yang dicocokkan lewat username) tertukar antar akun. Kalau
+    // username dasar sudah dipakai warga lain, tambahkan angka urut di
+    // belakang supaya tetap unik (mis. "riswanlusisinaga2").
+    const usernameDasar = dataReq.nama.toLowerCase().replace(/\s+/g, '');
+    const usernameTerpakai = new Set(members.map(m => (m.username || '').toLowerCase()));
+    let usernameBaru = usernameDasar;
+    let suffixUsername = 1;
+    while (usernameTerpakai.has(usernameBaru)) {
+      suffixUsername += 1;
+      usernameBaru = `${usernameDasar}${suffixUsername}`;
+    }
+    const idMemberBaru = generateUniqueMemberId(members);
     updateMembers([...members, {
       id: idMemberBaru,
       nama: dataReq.nama, nomorRumah: dataReq.nomorRumah || dataReq.nama, email: dataReq.email, wa: dataReq.wa, alamat: dataReq.alamat || '-', target: dataReq.target || TARGET_TAHUNAN,
