@@ -1257,27 +1257,59 @@ export default function IuranWargaRTApp() {
   // ==========================================
   const pendingSyncCountRef = useRef(0);
 
-  // Kirim (overwrite) satu tabel penuh ke Google Sheet. Dipakai setelah setiap
-  // perubahan Anggota/Iuran supaya Sheet selalu jadi cerminan data terbaru.
-  const syncSheet = async (sheetName, data, urlOverride) => {
+  // PERBAIKAN BUG "warga baru/perubahan tiba-tiba hilang ketimpa balik"
+  // (mis. akun Turitno hilang dari list Member, atau password hasil Reset
+  // Password Riswan ketimpa balik ke versi lama):
+  // -----------------------------------------------------------
+  // AKAR MASALAH TERAKHIR yang tersisa: walau data di STATE REACT sudah
+  // benar (lihat perbaikan `prev =>` di updateMembers & seluruh
+  // pemanggilnya), setiap aksi admin tetap memicu 1 request POST terpisah
+  // ke Google Apps Script yang MENIMPA TOTAL (overwrite penuh) isi sheet
+  // terkait. Kalau admin melakukan 2 aksi berturut-turut dengan CEPAT
+  // (mis. approve/aktivasi warga A, lalu detik berikutnya reset password
+  // warga B), 2 request POST itu dikirim hampir bersamaan lewat jaringan -
+  // TIDAK ADA JAMINAN keduanya tiba & diproses di server SESUAI URUTAN
+  // dikirim. Kalau request YANG LEBIH LAMA datanya (belum termasuk
+  // perubahan terbaru) kebetulan tiba BELAKANGAN di server, ia akan
+  // MENIMPA BALIK hasil request yang lebih baru - persis gejala "warga
+  // baru tiba-tiba hilang" / "password hasil reset balik ke versi lama".
+  // SOLUSI: antrekan (queue) request POST PER NAMA SHEET, supaya request
+  // berikutnya untuk sheet yang sama BARU dikirim setelah request
+  // sebelumnya benar-benar selesai diproses server - menjamin urutan
+  // sampai di server SAMA PERSIS dengan urutan aksi admin di layar.
+  const antreanSyncRef = useRef({});
+  const syncSheet = (sheetName, data, urlOverride) => {
     const urlTujuan = urlOverride || cmsTeks.appsScriptUrl;
-    if (!urlTujuan) return;
-    pendingSyncCountRef.current += 1;
-    try {
-      setSheetStatus('loading');
-      await sheetFetch(urlTujuan, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // hindari CORS preflight di Apps Script
-        body: JSON.stringify({ sheet: sheetName, data })
-      });
-      setSheetStatus('synced');
-    } catch (err) {
-      console.error(err);
-      setSheetStatus('error');
-      showToast(`Gagal sinkron ke Google Sheets: ${err.message}`, 'error');
-    } finally {
-      pendingSyncCountRef.current = Math.max(0, pendingSyncCountRef.current - 1);
-    }
+    if (!urlTujuan) return Promise.resolve();
+
+    const kirimSatuRequest = async () => {
+      pendingSyncCountRef.current += 1;
+      try {
+        setSheetStatus('loading');
+        await sheetFetch(urlTujuan, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // hindari CORS preflight di Apps Script
+          body: JSON.stringify({ sheet: sheetName, data })
+        });
+        setSheetStatus('synced');
+      } catch (err) {
+        console.error(err);
+        setSheetStatus('error');
+        showToast(`Gagal sinkron ke Google Sheets: ${err.message}`, 'error');
+      } finally {
+        pendingSyncCountRef.current = Math.max(0, pendingSyncCountRef.current - 1);
+      }
+    };
+
+    // Sambungkan ke antrean PER SHEET (bukan 1 antrean global) - supaya
+    // sinkron sheet "Anggota" & "Kegiatan" mis. tidak perlu saling menunggu
+    // satu sama lain, tapi 2 sinkron "Anggota" berturut-turut TETAP
+    // berurutan. `.catch(() => {})` di rantai supaya 1 request gagal tidak
+    // menghentikan antrean permanen untuk request-request berikutnya.
+    const antreanSebelumnya = antreanSyncRef.current[sheetName] || Promise.resolve();
+    const antreanBaru = antreanSebelumnya.catch(() => {}).then(kirimSatuRequest);
+    antreanSyncRef.current[sheetName] = antreanBaru;
+    return antreanBaru;
   };
 
   // Anggota Keluarga tersimpan sebagai ARRAY OBJEK bersarang (nama, jenisKelamin,
@@ -2232,7 +2264,7 @@ export default function IuranWargaRTApp() {
         jenisKelamin: formTambahAnggotaUser.jenisKelamin,
         tanggalLahir: formTambahAnggotaUser.tanggalLahir,
       } : a);
-      updateMembers(members.map(m => m.id === activeUserSession.id ? { ...m, anggotaKeluarga: daftarBaru } : m));
+      updateMembers(prev => prev.map(m => m.id === activeUserSession.id ? { ...m, anggotaKeluarga: daftarBaru } : m));
       setActiveUserSession(prev => ({ ...prev, anggotaKeluarga: daftarBaru }));
       setEditingAnggotaKeluargaId(null);
       setFormTambahAnggotaUser({ nama: '', hubungan: 'Suami', jenisKelamin: 'Perempuan', tanggalLahir: '' });
@@ -2241,7 +2273,7 @@ export default function IuranWargaRTApp() {
     }
     const anggotaBaru = { id: 'AK-' + Date.now(), nama: formTambahAnggotaUser.nama.trim(), hubungan: formTambahAnggotaUser.hubungan, jenisKelamin: formTambahAnggotaUser.jenisKelamin, tanggalLahir: formTambahAnggotaUser.tanggalLahir };
     const daftarBaru = [...(activeUserSession.anggotaKeluarga || []), anggotaBaru];
-    updateMembers(members.map(m => m.id === activeUserSession.id ? { ...m, anggotaKeluarga: daftarBaru } : m));
+    updateMembers(prev => prev.map(m => m.id === activeUserSession.id ? { ...m, anggotaKeluarga: daftarBaru } : m));
     setActiveUserSession(prev => ({ ...prev, anggotaKeluarga: daftarBaru }));
     setFormTambahAnggotaUser({ nama: '', hubungan: 'Suami', jenisKelamin: 'Perempuan', tanggalLahir: '' });
     showToast('Anggota keluarga berhasil ditambahkan.');
@@ -2265,7 +2297,7 @@ export default function IuranWargaRTApp() {
       return;
     }
     const daftarBaru = (activeUserSession.anggotaKeluarga || []).filter(a => a.id !== id);
-    updateMembers(members.map(m => m.id === activeUserSession.id ? { ...m, anggotaKeluarga: daftarBaru } : m));
+    updateMembers(prev => prev.map(m => m.id === activeUserSession.id ? { ...m, anggotaKeluarga: daftarBaru } : m));
     setActiveUserSession(prev => ({ ...prev, anggotaKeluarga: daftarBaru }));
     if (editingAnggotaKeluargaId === id) handleBatalEditAnggotaKeluargaUser();
     showToast('Anggota keluarga berhasil dihapus.', 'error');
@@ -3332,10 +3364,12 @@ export default function IuranWargaRTApp() {
     const member = members.find(m => m.id === userId);
     if (!member) return;
     const kelompokLama = member.kelompok;
-    const updated = members.map(m => (m.id === userId ? { ...m, kelompok: kelompokBaru } : m));
-    updateMembers(updated);
-    const currentEdit = updated.find(m => m.id === activeUserSession.id);
-    if (currentEdit) setActiveUserSession(currentEdit);
+    // PERBAIKAN RACE CONDITION: bentuk fungsi (prev => ...) supaya array
+    // selalu disusun dari state PALING BARU, bukan snapshot `members` lama
+    // yang bisa ketinggalan kalau ada aksi admin lain terjadi hampir
+    // bersamaan (lihat catatan lengkap di handleApproveMemberBaru).
+    updateMembers(prev => prev.map(m => (m.id === userId ? { ...m, kelompok: kelompokBaru } : m)));
+    if (activeUserSession.id === userId) setActiveUserSession(prev => ({ ...prev, kelompok: kelompokBaru }));
 
     if (kelompokLama !== kelompokBaru) {
       setRiwayatPindahKelompok(prev => [...prev, {
@@ -3343,7 +3377,7 @@ export default function IuranWargaRTApp() {
         memberNama: member.nama,
         dari: kelompokLama,
         ke: kelompokBaru,
-        tanggal: '11 Jul 2026'
+        tanggal: new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' })
       }]);
       showToast(`${member.nama} dipindahkan dari "${kelompokLama}" ke "${kelompokBaru}".`);
     }
@@ -3735,7 +3769,7 @@ export default function IuranWargaRTApp() {
   };
 
   const toggleStatusAnggota = (id) => {
-    updateMembers(members.map(m => m.id === id ? { ...m, statusAnggota: m.statusAnggota === 'Aktif' ? 'Pasif' : 'Aktif' } : m));
+    updateMembers(prev => prev.map(m => m.id === id ? { ...m, statusAnggota: m.statusAnggota === 'Aktif' ? 'Pasif' : 'Aktif' } : m));
   };
 
   // ==========================================
@@ -3753,7 +3787,7 @@ export default function IuranWargaRTApp() {
     }
     const ok = window.confirm(`Hapus PERMANEN akun "${member.nama}" (${member.nomorRumah || '-'})?\n\nSeluruh data profil warga ini (bukan riwayat iuran/kuitansi yang sudah tercatat) akan dihapus dan tidak bisa dikembalikan.`);
     if (!ok) return;
-    updateMembers(members.filter(m => m.id !== member.id));
+    updateMembers(prev => prev.filter(m => m.id !== member.id));
     setSelectedMemberIds(prev => prev.filter(id => id !== member.id));
     showToast(`Akun warga "${member.nama}" (Pasif) berhasil dihapus permanen.`, 'error');
   };
@@ -3768,7 +3802,7 @@ export default function IuranWargaRTApp() {
     const ok = window.confirm(`Hapus PERMANEN ${targetPasif.length} akun warga berstatus Pasif yang dipilih?\n\nTindakan ini tidak bisa dibatalkan.`);
     if (!ok) return;
     const idPasif = new Set(targetPasif.map(m => m.id));
-    updateMembers(members.filter(m => !idPasif.has(m.id)));
+    updateMembers(prev => prev.filter(m => !idPasif.has(m.id)));
     setSelectedMemberIds(prev => prev.filter(id => !idPasif.has(id)));
     showToast(`${targetPasif.length} akun warga Pasif berhasil dihapus permanen.`, 'error');
   };
@@ -3797,7 +3831,7 @@ export default function IuranWargaRTApp() {
     }
     const ok = window.confirm(`Ubah status ${idsTarget.length} anggota menjadi "${statusBaru}"?`);
     if (!ok) return;
-    updateMembers(members.map(m => idsTarget.includes(m.id) ? { ...m, statusAnggota: statusBaru } : m));
+    updateMembers(prev => prev.map(m => idsTarget.includes(m.id) ? { ...m, statusAnggota: statusBaru } : m));
     setSelectedMemberIds([]);
     showToast(`${idsTarget.length} anggota berhasil diubah menjadi status ${statusBaru}.`);
   };
@@ -4202,10 +4236,31 @@ export default function IuranWargaRTApp() {
       usernameBaru = `${usernameDasar}${suffixUsername}`;
     }
     const idMemberBaru = generateUniqueMemberId(members);
-    updateMembers([...members, {
+    // PERBAIKAN BUG: sebelumnya tanggal "bergabung" DI-HARDCODE ke string
+    // tetap '11 Jul 2026' untuk SEMUA warga yang diaktivasi, apa pun hari
+    // aktivasi sebenarnya - makanya daftar "Terbaru berdasarkan daftar
+    // Portal RT 40" selalu menampilkan tanggal yang SAMA PERSIS untuk semua
+    // warga baru. Sekarang diambil dari tanggal aktivasi SEBENARNYA (hari
+    // ini, zona waktu Asia/Jakarta), format ISO "YYYY-MM-DD" supaya tetap
+    // dikenali dengan benar oleh formatTanggalIndo/formatTanggalLaporan.
+    const tanggalAktivasiHariIni = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
+    // PERBAIKAN BUG "warga baru tiba-tiba hilang dari list Member" (mis.
+    // kasus Turitno): sebelumnya array baru dihitung dari `members` yang
+    // ditangkap SAAT FUNGSI INI DIPANGGIL (closure), lalu dikirim langsung
+    // ke updateMembers sebagai NILAI JADI (bukan fungsi). Kalau ada aksi
+    // admin LAIN yang terjadi hampir bersamaan (mis. reset password warga
+    // lain, approve pengajuan lain, dobel klik) sebelum React sempat
+    // re-render, aksi itu ikut memakai `members` LAMA yang sama (BELUM
+    // termasuk warga yang baru saja diaktivasi ini) - dan overwrite PENUH
+    // ke Google Sheet yang terjadi BELAKANGAN akan MENIMPA/MENGHAPUS balik
+    // baris warga baru tsb, walau sebenarnya sudah sempat "masuk" sesaat.
+    // SOLUSI: gunakan bentuk FUNGSI (prev => ...) supaya updateMembers
+    // selalu menyusun array dari state PALING BARU (prev), bukan dari
+    // snapshot lama - menghilangkan celah race condition "lost update" ini.
+    updateMembers(prev => [...prev, {
       id: idMemberBaru,
       nama: dataReq.nama, nomorRumah: dataReq.nomorRumah || dataReq.nama, email: dataReq.email, wa: dataReq.wa, alamat: dataReq.alamat || '-', target: dataReq.target || TARGET_TAHUNAN,
-      bergabung: '11 Jul 2026', username: usernameBaru, password: passwordBaru,
+      bergabung: tanggalAktivasiHariIni, username: usernameBaru, password: passwordBaru,
       statusAnggota: 'Aktif', kelompok: kelompokTerpilih, akses: aksesTerpilih,
       statusRumah: dataReq.statusRumah || 'Milik Sendiri', anggotaKeluarga: dataReq.anggotaKeluarga || []
     }]);
@@ -4263,8 +4318,23 @@ export default function IuranWargaRTApp() {
 
     setSedangResetPassword(prev => ({ ...prev, [memberId]: true }));
     const passwordBaru = generateRandomPassword();
-    const updated = members.map(m => m.id === memberId ? { ...m, password: passwordBaru } : m);
-    updateMembers(updated);
+    // PERBAIKAN BUG "reset password 1 warga malah kena ke warga lain" (mis.
+    // reset password Riswan Lusi Sinaga tapi yang muncul/terkirim malah
+    // punya Abas): SEBELUMNYA array baru dihitung dari `members` yang
+    // ditangkap saat fungsi ini dipanggil, lalu dikirim sebagai NILAI JADI
+    // (bukan fungsi) ke updateMembers. Kalau admin klik "Reset Password"
+    // untuk 2 warga berbeda dengan cepat berturut-turut (atau reset password
+    // + aksi admin lain hampir bersamaan), KEDUA proses menghitung array
+    // dari `members` LAMA yang SAMA PERSIS, sehingga proses yang overwrite
+    // ke Google Sheet PALING BELAKANGAN akan MENIMPA BALIK perubahan
+    // password yang baru saja disimpan admin lain - password baru salah
+    // satu warga jadi "hilang"/ketimpa nilai lama, atau notifikasi WA/Email
+    // yang terkirim terasa tertukar antar warga. `target` (nama/WA/email
+    // tujuan notifikasi di bawah) TETAP diambil per `memberId` yang benar,
+    // jadi notifikasi tidak pernah salah orang - yang diperbaiki di sini
+    // murni supaya password barunya benar-benar TERSIMPAN untuk warga yang
+    // tepat, tidak ketimpa proses lain yang terjadi bersamaan.
+    updateMembers(prev => prev.map(m => m.id === memberId ? { ...m, password: passwordBaru } : m));
     if (activeUserSession.id === memberId) setActiveUserSession({ ...activeUserSession, password: passwordBaru });
     kirimEmailSimulasi({
       to: target.email,
@@ -4349,7 +4419,7 @@ export default function IuranWargaRTApp() {
     if ((target.akses || 'user') === aksesBaru) return;
     const ok = window.confirm(`Ubah akses ${target.nama} menjadi "${aksesBaru === 'admin' ? 'Admin (akses penuh)' : 'User (akses terbatas)'}"?`);
     if (!ok) return;
-    updateMembers(members.map(m => m.id === memberId ? { ...m, akses: aksesBaru } : m));
+    updateMembers(prev => prev.map(m => m.id === memberId ? { ...m, akses: aksesBaru } : m));
     if (activeUserSession.id === memberId) setActiveUserSession({ ...activeUserSession, akses: aksesBaru });
     showToast(`Akses ${target.nama} berhasil diubah menjadi ${aksesBaru === 'admin' ? 'Admin (akses penuh)' : 'User (akses terbatas)'}.`);
   };
@@ -4371,7 +4441,7 @@ export default function IuranWargaRTApp() {
     const statusBaru = !target.pengurus;
     const ok = window.confirm(`${statusBaru ? 'Tandai' : 'Lepas tanda'} "${target.nama}" sebagai Akun Pengurus?\n\n${statusBaru ? 'Target & pembayaran warga ini akan DIKELUARKAN dari rekap Keuangan RT di Dashboard Utama (Total Kas Global & Sisa Tagihan), tapi tetap dihitung penuh di Informasi Warga.' : 'Target & pembayaran warga ini akan MASUK KEMBALI ke rekap Keuangan RT di Dashboard Utama.'}`);
     if (!ok) return;
-    updateMembers(members.map(m => m.id === id ? { ...m, pengurus: statusBaru } : m));
+    updateMembers(prev => prev.map(m => m.id === id ? { ...m, pengurus: statusBaru } : m));
     if (activeUserSession.id === id) setActiveUserSession({ ...activeUserSession, pengurus: statusBaru });
     showToast(`"${target.nama}" ${statusBaru ? 'ditandai sebagai Akun Pengurus (dikecualikan dari Keuangan RT).' : 'sudah bukan Akun Pengurus lagi (masuk kembali ke Keuangan RT).'}`);
   };
