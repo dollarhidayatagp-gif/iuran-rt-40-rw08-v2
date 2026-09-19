@@ -390,6 +390,562 @@ const DEFAULT_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwr2Snf
 // kalau tidak sama persis, semua login & permintaan data akan ditolak server.
 const APP_SECRET = 'ISFWkod0HCqvYLZkVsIeZquIGt82sQYeRoHtBKLa';
 
+// =====================================================================
+// SISTEM TEMA WARNA (PALET) - MENGIKUTI PERMINTAAN:
+//  - Ada beberapa palet tema warna yang bisa dipilih lewat tombol "Tema"
+//    di bar paling atas (tampil untuk pengunjung, warga, maupun admin).
+//  - Tema BAWAAN diatur oleh ADMIN (disimpan di kolom `temaWarna` sheet
+//    "Pengaturan" bersama pengaturan CMS lain). Kalau admin mengganti tema,
+//    SEMUA pengunjung & warga otomatis ikut berganti.
+//  - Pengunjung / warga yang mengganti tema HANYA mengubah tampilan di layar
+//    mereka sendiri saat itu (tidak disimpan, kembali ke tema admin saat
+//    halaman dibuka ulang).
+//
+// CARA KERJA: setiap tema = 2 ramp warna (11 tingkat, 50 - 950):
+//   d = warna DASAR/gelap (dulu biru navy)   -> variabel --tm-d50 ... --tm-d950
+//   a = warna AKSEN/tombol (dulu hijau zamrud) -> variabel --tm-a50 ... --tm-a950
+// Variabel ini dipasang di elemen akar aplikasi. Kelas Tailwind lama
+// (bg-blue-950, bg-emerald-600, dst) dialihkan ke variabel tsb lewat
+// aturan CSS di buatCssTema() di bawah, jadi SELURUH halaman berubah warna
+// tanpa perlu mengubah ribuan kelas satu per satu.
+// =====================================================================
+const TINGKAT_WARNA = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
+const RAMP_WARNA = {
+  blue: ['#eff6ff', '#dbeafe', '#bfdbfe', '#93c5fd', '#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#1e40af', '#1e3a8a', '#172554'],
+  emerald: ['#ecfdf5', '#d1fae5', '#a7f3d0', '#6ee7b7', '#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064e3b', '#022c22'],
+  green: ['#f0fdf4', '#dcfce7', '#bbf7d0', '#86efac', '#4ade80', '#22c55e', '#16a34a', '#15803d', '#166534', '#14532d', '#052e16'],
+  violet: ['#f5f3ff', '#ede9fe', '#ddd6fe', '#c4b5fd', '#a78bfa', '#8b5cf6', '#7c3aed', '#6d28d9', '#5b21b6', '#4c1d95', '#2e1065'],
+  fuchsia: ['#fdf4ff', '#fae8ff', '#f5d0fe', '#f0abfc', '#e879f9', '#d946ef', '#c026d3', '#a21caf', '#86198f', '#701a75', '#4a044e'],
+  orange: ['#fff7ed', '#ffedd5', '#fed7aa', '#fdba74', '#fb923c', '#f97316', '#ea580c', '#c2410c', '#9a3412', '#7c2d12', '#431407'],
+  teal: ['#f0fdfa', '#ccfbf1', '#99f6e4', '#5eead4', '#2dd4bf', '#14b8a6', '#0d9488', '#0f766e', '#115e59', '#134e4a', '#042f2e'],
+  sky: ['#f0f9ff', '#e0f2fe', '#bae6fd', '#7dd3fc', '#38bdf8', '#0ea5e9', '#0284c7', '#0369a1', '#075985', '#0c4a6e', '#082f49'],
+  slate: ['#f8fafc', '#f1f5f9', '#e2e8f0', '#cbd5e1', '#94a3b8', '#64748b', '#475569', '#334155', '#1e293b', '#0f172a', '#020617'],
+  indigo: ['#eef2ff', '#e0e7ff', '#c7d2fe', '#a5b4fc', '#818cf8', '#6366f1', '#4f46e5', '#4338ca', '#3730a3', '#312e81', '#1e1b4b'],
+};
+const TEMA_WARNA = [
+  { id: 'biru', nama: 'Biru Navy', d: 'blue', a: 'emerald' },
+  { id: 'hijau', nama: 'Hijau Rimba', d: 'emerald', a: 'green' },
+  { id: 'ungu', nama: 'Ungu Royal', d: 'violet', a: 'fuchsia' },
+  { id: 'oranye', nama: 'Oranye Senja', d: 'orange', a: 'teal' },
+  { id: 'tosca', nama: 'Tosca Laut', d: 'teal', a: 'sky' },
+  { id: 'slate', nama: 'Slate Elegan', d: 'slate', a: 'indigo' },
+];
+const TEMA_DEFAULT_ID = 'biru';
+const cariTema = (id) => TEMA_WARNA.find((t) => t.id === id) || TEMA_WARNA[0];
+const idTemaValid = (id) => (TEMA_WARNA.some((t) => t.id === id) ? id : TEMA_DEFAULT_ID);
+function buatVariabelTema(id) {
+  const tema = cariTema(id);
+  const vars = {};
+  TINGKAT_WARNA.forEach((tingkat, i) => {
+    vars[`--tm-d${tingkat}`] = RAMP_WARNA[tema.d][i];
+    vars[`--tm-a${tingkat}`] = RAMP_WARNA[tema.a][i];
+  });
+  return vars;
+}
+const swatchTema = (tema) => `linear-gradient(135deg, ${RAMP_WARNA[tema.d][9]} 0%, ${RAMP_WARNA[tema.d][7]} 48%, ${RAMP_WARNA[tema.a][5]} 52%, ${RAMP_WARNA[tema.a][6]} 100%)`;
+
+// Daftar pengalihan kelas Tailwind lama -> variabel tema.
+// Format: [kelas, properti CSS, ramp ('d' | 'a'), tingkat, opasitas% (opsional), pseudo (opsional)]
+const TEMA_ATURAN = (() => {
+  const r = [];
+  const tambah = (prefixKelas, prop, ramp, tingkatList, extra = {}) => {
+    tingkatList.forEach((t) => r.push([`${prefixKelas}-${t}`, prop, ramp, t, extra.alpha, extra.pseudo]));
+  };
+  // ---- ramp DASAR (dulu blue) ----
+  tambah('bg-blue', 'background-color', 'd', [50, 100, 800, 900, 950]);
+  tambah('text-blue', 'color', 'd', [50, 100, 200, 300, 700, 800, 950]);
+  tambah('border-blue', 'border-color', 'd', [700, 800, 900]);
+  [['bg-blue-950/60', 'background-color', 950, 60], ['bg-blue-950/70', 'background-color', 950, 70], ['bg-blue-950/50', 'background-color', 950, 50],
+    ['bg-blue-900/60', 'background-color', 900, 60], ['bg-blue-800/70', 'background-color', 800, 70], ['bg-blue-800/60', 'background-color', 800, 60],
+    ['text-blue-300/80', 'color', 300, 80], ['border-blue-900/60', 'border-color', 900, 60], ['border-blue-900/50', 'border-color', 900, 50],
+    ['border-blue-800/60', 'border-color', 800, 60], ['border-blue-400/30', 'border-color', 400, 30], ['shadow-blue-950/30', '--tw-shadow-color', 950, 30],
+    ['shadow-blue-900/30', '--tw-shadow-color', 900, 30], ['ring-blue-400/40', '--tw-ring-color', 400, 40],
+  ].forEach(([k, p, t, a]) => r.push([k, p, 'd', t, a]));
+  r.push(['hover:bg-blue-800/60', 'background-color', 'd', 800, 60, 'hover']);
+  // ---- ramp AKSEN (dulu emerald) ----
+  tambah('bg-emerald', 'background-color', 'a', [50, 100, 400, 500, 600, 700, 800, 900]);
+  tambah('text-emerald', 'color', 'a', [50, 200, 300, 400, 500, 600, 700, 800, 950]);
+  tambah('border-emerald', 'border-color', 'a', [100, 200, 300, 600, 800, 900]);
+  [['shadow-emerald-900/40', '--tw-shadow-color', 900, 40], ['text-emerald-800/40', 'color', 800, 40], ['text-emerald-800/30', 'color', 800, 30], ['text-emerald-500/10', 'color', 500, 10]]
+    .forEach(([k, p, t, a]) => r.push([k, p, 'a', t, a]));
+  r.push(['accent-emerald-700', 'accent-color', 'a', 700]);
+  r.push(['hover:bg-emerald-50', 'background-color', 'a', 50, undefined, 'hover']);
+  r.push(['hover:bg-emerald-400', 'background-color', 'a', 400, undefined, 'hover']);
+  r.push(['hover:text-emerald-700', 'color', 'a', 700, undefined, 'hover']);
+  return r;
+})();
+function buatCssTema() {
+  const esc = (s) => s.replace(/[:/.]/g, (m) => `\\${m}`);
+  const aturan = TEMA_ATURAN.map(([kelas, prop, ramp, tingkat, alpha, pseudo]) => {
+    const v = `var(--tm-${ramp}${tingkat})`;
+    const nilai = alpha ? `color-mix(in srgb, ${v} ${alpha}%, transparent)` : v;
+    return `.app-root .${esc(kelas)}${pseudo ? `:${pseudo}` : ''}{${prop}:${nilai} !important}`;
+  });
+  // Gradasi (bg-gradient-to-* from-blue-950 via-blue-900 to-blue-950 dst) ditulis
+  // ulang langsung sebagai background-image supaya tidak bergantung pada versi
+  // Tailwind (v3 / v4 menyimpan variabel gradasi dengan cara yang berbeda).
+  const arah = { br: 'to bottom right', b: 'to bottom', r: 'to right', t: 'to top' };
+  Object.entries(arah).forEach(([k, dir]) => {
+    aturan.push(`.app-root .bg-gradient-to-${k}.from-blue-950{background-image:linear-gradient(${dir},var(--tm-d950),var(--tm-d900),var(--tm-d950)) !important}`);
+  });
+  aturan.push('.app-root .bg-gradient-to-br.from-blue-950.to-indigo-900{background-image:linear-gradient(to bottom right,var(--tm-d950),var(--tm-d900),var(--tm-a800)) !important}');
+  aturan.push('.app-root .hover\\:from-blue-900:hover{background-image:linear-gradient(to right,var(--tm-d900),var(--tm-d800),var(--tm-d900)) !important}');
+  aturan.push('.app-root .bg-gradient-to-t.from-emerald-700{background-image:linear-gradient(to top,var(--tm-a700),var(--tm-a400)) !important}');
+  return aturan.join('\n');
+}
+
+// =====================================================================
+// IKON SVG (SATU KUMPULAN IKON GARIS - TANPA LIBRARY TAMBAHAN)
+// =====================================================================
+const IKON_PATH = {
+  home: <><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5" /></>,
+  building: <><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M9 21v-4h6v4M8 7h2M14 7h2M8 11h2M14 11h2" /></>,
+  users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>,
+  user: <><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>,
+  userPlus: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6M22 11h-6" /></>,
+  file: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" /></>,
+  lock: <><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></>,
+  bell: <><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></>,
+  calendar: <><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></>,
+  check: <path d="M20 6 9 17l-5-5" />,
+  checkCircle: <><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><path d="M22 4 12 14.01l-3-3" /></>,
+  target: <><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></>,
+  card: <><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /></>,
+  coin: <><circle cx="12" cy="12" r="10" /><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8M12 18V6" /></>,
+  percent: <><path d="M19 5 5 19" /><circle cx="6.5" cy="6.5" r="2.5" /><circle cx="17.5" cy="17.5" r="2.5" /></>,
+  trend: <><path d="M22 7 13.5 15.5 8.5 10.5 2 17" /><path d="M16 7h6v6" /></>,
+  chart: <path d="M12 20V10M18 20V4M6 20v-4" />,
+  eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>,
+  eyeOff: <><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68M6.61 6.61A13.53 13.53 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61M2 2l20 20" /></>,
+  megaphone: <><path d="m3 11 18-5v12L3 14v-3z" /><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" /></>,
+  mapPin: <><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0z" /><circle cx="12" cy="10" r="3" /></>,
+  phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />,
+  key: <><circle cx="7.5" cy="15.5" r="4.5" /><path d="m10.7 12.3 9.8-9.8M17 6l3 3M14 9l2 2" /></>,
+  arrowRight: <path d="M5 12h14M13 6l6 6-6 6" />,
+  copy: <><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></>,
+  info: <><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></>,
+  pencil: <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z" />,
+  x: <path d="M18 6 6 18M6 6l12 12" />,
+  chevL: <path d="m15 18-6-6 6-6" />,
+  chevR: <path d="m9 18 6-6-6-6" />,
+  palette: <><circle cx="13.5" cy="6.5" r="1" /><circle cx="17.5" cy="10.5" r="1" /><circle cx="8.5" cy="7.5" r="1" /><circle cx="6.5" cy="12.5" r="1" /><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.84-.44-1.12-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.55-2.5 5.55-5.55C21.97 6.01 17.46 2 12 2z" /></>,
+  landmark: <path d="M3 22h18M6 18v-7M10 18v-7M14 18v-7M18 18v-7M12 2 3 7h18z" />,
+  clipboard: <><rect x="8" y="2" width="8" height="4" rx="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><path d="M9 14h6M9 18h4" /></>,
+  clock: <><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></>,
+  alert: <><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3z" /><path d="M12 9v4M12 17h.01" /></>,
+  receipt: <><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z" /><path d="M15.5 8.5h-5a1.75 1.75 0 1 0 0 3.5h3a1.75 1.75 0 1 1 0 3.5H8.5M12 6.5v11" /></>,
+  cog: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33 1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82 1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></>,
+  logout: <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />,
+  refresh: <><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M16 16h5v5" /></>,
+};
+function Ikon({ nama, className = 'w-5 h-5', strokeWidth = 2 }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      {IKON_PATH[nama] || null}
+    </svg>
+  );
+}
+function IkonWhatsapp({ className = 'w-5 h-5' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M20.52 3.48A11.86 11.86 0 0 0 12.04 0C5.5 0 .2 5.3.2 11.84c0 2.09.55 4.13 1.59 5.93L0 24l6.37-1.67a11.8 11.8 0 0 0 5.66 1.44h.01c6.54 0 11.84-5.3 11.84-11.84 0-3.16-1.23-6.13-3.36-8.45zM12.04 21.8h-.01a9.9 9.9 0 0 1-5.04-1.38l-.36-.21-3.78.99 1.01-3.68-.24-.38a9.85 9.85 0 0 1-1.51-5.26c0-5.45 4.44-9.89 9.9-9.89 2.64 0 5.12 1.03 6.99 2.9a9.82 9.82 0 0 1 2.89 7c0 5.45-4.44 9.9-9.85 9.9zm5.43-7.41c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.07-.15-.67-1.62-.92-2.22-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.22 3.08c.15.2 2.1 3.2 5.08 4.49.71.31 1.26.49 1.69.63.71.23 1.36.2 1.87.12.57-.08 1.76-.72 2.01-1.41.25-.7.25-1.29.17-1.41-.07-.12-.27-.2-.57-.35z" />
+    </svg>
+  );
+}
+
+// =====================================================================
+// LATAR ILUSTRASI PERUMAHAN (SVG) - PENGGANTI "GAMBAR BACKGROUND"
+// -----------------------------------------------------------
+// Gambar latar bergaya perumahan (rumah, pohon, daun, awan, gerbang) yang
+// digambar sebagai SVG dan seluruh warnanya memakai variabel tema (--tm-*),
+// jadi OTOMATIS mengikuti tema warna yang dipilih. variant:
+//   'hero'    -> banner besar Web Utama (ada gerbang perumahan + label RT)
+//   'sapaan'  -> kartu sapaan Dashboard (terang, memudar ke kiri)
+//   'header'  -> banner tipis di atas halaman Dashboard
+//   'sidebar' -> hiasan siluet di bawah sidebar
+// =====================================================================
+function AdeganPerumahan({ variant = 'header', className = '', label = 'RT 40 RW 08', style }) {
+  const v = (n) => `var(--tm-${n})`;
+  const isi = (n, o) => ({ fill: v(n), ...(o !== undefined ? { opacity: o } : {}) });
+  const stop = (n, o) => ({ stopColor: v(n), ...(o !== undefined ? { stopOpacity: o } : {}) });
+  const gid = (s) => `tm-${variant}-${s}`;
+  const url = (s) => `url(#${gid(s)})`;
+  const K = 0.32; // kemiringan sisi rumah (efek 3D)
+
+  const defs = (
+    <defs>
+      <filter id={gid('b1')} x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.1" /></filter>
+      <filter id={gid('b2')} x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.4" /></filter>
+      <filter id={gid('b3')} x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="4.5" /></filter>
+      <linearGradient id={gid('front')} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#ffffff" /><stop offset="1" style={stop('d100')} /></linearGradient>
+      <linearGradient id={gid('side')} x1="0" y1="0" x2="1" y2="0"><stop offset="0" style={stop('d200')} /><stop offset="1" style={stop('d300')} /></linearGradient>
+      <linearGradient id={gid('roof')} x1="0" y1="0" x2="0" y2="1"><stop offset="0" style={stop('d600')} /><stop offset="1" style={stop('d800')} /></linearGradient>
+      <linearGradient id={gid('roofB')} x1="0" y1="0" x2="0" y2="1"><stop offset="0" style={stop('a600')} /><stop offset="1" style={stop('a800')} /></linearGradient>
+      <linearGradient id={gid('glass')} x1="0" y1="0" x2="1" y2="1"><stop offset="0" style={stop('d200')} /><stop offset="0.55" style={stop('d400')} /><stop offset="1" style={stop('d600')} /></linearGradient>
+      <linearGradient id={gid('leaf')} x1="0" y1="0" x2="1" y2="1"><stop offset="0" style={stop('a300')} /><stop offset="1" style={stop('a700')} /></linearGradient>
+      <linearGradient id={gid('lawn')} x1="0" y1="0" x2="0" y2="1"><stop offset="0" style={stop('a500')} /><stop offset="1" style={stop('a700')} /></linearGradient>
+      <linearGradient id={gid('road')} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#e5e7eb" /><stop offset="1" stopColor="#cbd5e1" /></linearGradient>
+      <linearGradient id={gid('pilar')} x1="0" y1="0" x2="1" y2="0"><stop offset="0" style={stop('d800')} /><stop offset="0.5" style={stop('d700')} /><stop offset="1" style={stop('d900')} /></linearGradient>
+      <radialGradient id={gid('fol')} cx="0.35" cy="0.3" r="0.85"><stop offset="0" style={stop('a300')} /><stop offset="0.55" style={stop('a500')} /><stop offset="1" style={stop('a700')} /></radialGradient>
+      <radialGradient id={gid('sun')} cx="0.82" cy="0.18" r="0.55"><stop offset="0" stopColor="#ffffff" stopOpacity="0.75" /><stop offset="1" stopColor="#ffffff" stopOpacity="0" /></radialGradient>
+    </defs>
+  );
+
+  // Rumah 2 sisi (depan + samping) supaya terlihat 3 dimensi seperti render perumahan.
+  const Rumah = ({ x, y, w = 70, h = 42, d = 22, atap = 'roof', o = 1, blur = 0, pintu = 'a700', gelap = false }) => {
+    const tinggi = h * 0.55;
+    const bx = x + w / 2, by = y - tinggi, tepi = 6;
+    const strokeAtap = atap === 'roofB' ? 'a700' : 'd700';
+    const dep = gelap ? { fill: v('d800') } : { fill: url('front') };
+    const smp = gelap ? { fill: v('d900') } : { fill: url('side') };
+    const atp = gelap ? { fill: v('d950') } : { fill: url(atap) };
+    const kaca = gelap ? { fill: v('a300'), opacity: 0.55 } : { fill: url('glass') };
+    return (
+      <g opacity={o} filter={blur ? url(`b${blur}`) : undefined}>
+        <ellipse cx={x + (w + d) / 2} cy={y + h + 1} rx={(w + d) / 2 + 6} ry="3" style={{ fill: '#08170f', opacity: 0.3 }} />
+        <polygon points={`${x + w},${y} ${x + w + d},${y - d * K} ${x + w + d},${y + h - d * K} ${x + w},${y + h}`} style={smp} />
+        <polygon points={`${bx},${by} ${bx + d},${by - d * K} ${x + w + tepi + d},${y + 2 - d * K} ${x + w + tepi},${y + 2}`} style={atp} />
+        {!gelap && <polygon points={`${bx},${by} ${bx + d},${by - d * K} ${x + w + tepi + d},${y + 2 - d * K} ${x + w + tepi},${y + 2}`} style={{ fill: '#000', opacity: 0.16 }} />}
+        <polygon points={`${x},${y} ${bx},${by + 3} ${x + w},${y} ${x + w},${y + h} ${x},${y + h}`} style={dep} />
+        <polyline points={`${x - tepi},${y + 2} ${bx},${by} ${x + w + tepi},${y + 2}`} fill="none" strokeWidth="3" strokeLinejoin="round" style={{ stroke: gelap ? v('d950') : v(strokeAtap) }} />
+        {[x + w * 0.12, x + w * 0.62].map((wx, i) => (
+          <g key={i}>
+            <rect x={wx} y={y + h * 0.2} width={w * 0.26} height={h * 0.32} rx="1" style={kaca} />
+            {!gelap && <rect x={wx} y={y + h * 0.2} width={w * 0.26} height={h * 0.32} rx="1" fill="none" stroke="#ffffff" strokeWidth="1.1" />}
+            {!gelap && <path d={`M${wx + w * 0.13} ${y + h * 0.2}v${h * 0.32}`} stroke="#ffffff" strokeWidth="0.8" />}
+          </g>
+        ))}
+        <rect x={x + w * 0.42} y={y + h * 0.5} width={w * 0.16} height={h * 0.5} rx="1" style={gelap ? { fill: v('d950') } : isi(pintu)} />
+        {!gelap && <rect x={x + w * 0.39} y={y + h * 0.46} width={w * 0.22} height="2.4" style={{ fill: '#ffffff', opacity: 0.92 }} />}
+        <circle cx={bx} cy={y - tinggi * 0.32} r={Math.max(2, h * 0.08)} style={kaca} />
+      </g>
+    );
+  };
+  const Pohon = ({ x, y, s = 1, o = 1, blur = 0 }) => (
+    <g transform={`translate(${x} ${y}) scale(${s})`} opacity={o} filter={blur ? url(`b${blur}`) : undefined}>
+      <rect x="-2.5" y="-14" width="5" height="18" rx="2" style={{ fill: '#6b4423' }} />
+      <circle cx="0" cy="-28" r="22" style={{ fill: v('a800') }} />
+      <circle cx="-15" cy="-21" r="14" style={{ fill: url('fol') }} />
+      <circle cx="15" cy="-21" r="14" style={{ fill: url('fol') }} />
+      <circle cx="0" cy="-35" r="17" style={{ fill: url('fol') }} />
+      <circle cx="-13" cy="-33" r="10" style={{ fill: url('fol') }} />
+      <circle cx="12" cy="-34" r="10" style={{ fill: url('fol') }} />
+      <circle cx="-7" cy="-43" r="8" style={{ fill: v('a200'), opacity: 0.4 }} />
+      <circle cx="9" cy="-24" r="6" style={{ fill: v('a700'), opacity: 0.45 }} />
+    </g>
+  );
+  const Semak = ({ x, y, s = 1, o = 1 }) => (
+    <g transform={`translate(${x} ${y}) scale(${s})`} opacity={o}>
+      <ellipse cx="0" cy="0" rx="15" ry="7.5" style={{ fill: url('fol') }} />
+      <ellipse cx="-11" cy="2" rx="9" ry="5.5" style={{ fill: url('fol') }} />
+      <ellipse cx="11" cy="2" rx="9" ry="5.5" style={{ fill: url('fol') }} />
+      <ellipse cx="-3" cy="-2" rx="6" ry="3" style={{ fill: v('a200'), opacity: 0.35 }} />
+    </g>
+  );
+  const Daun = ({ x, y, r = 0, s = 1, o = 1, blur = 0, gelap = false }) => (
+    <g transform={`translate(${x} ${y}) rotate(${r}) scale(${s})`} opacity={o} filter={blur ? url(`b${blur}`) : undefined}>
+      <path d="M0 0C24-58 96-84 170-58C138-16 66 16 0 0Z" style={{ fill: gelap ? v('a700') : url('leaf') }} />
+      <path d="M0 0C44-26 96-42 158-54" stroke="#ffffff" strokeOpacity="0.42" strokeWidth="1.6" fill="none" />
+      <path d="M40-18C50-34 66-42 84-48M70-12C84-24 100-30 120-34" stroke="#ffffff" strokeOpacity="0.22" strokeWidth="1.2" fill="none" />
+    </g>
+  );
+  const Awan = ({ x, y, s = 1, o = 0.7 }) => (
+    <g transform={`translate(${x} ${y}) scale(${s})`} opacity={o} filter={url('b2')} style={{ fill: '#ffffff' }}>
+      <ellipse cx="0" cy="0" rx="46" ry="11" /><ellipse cx="-22" cy="-8" rx="24" ry="12" /><ellipse cx="14" cy="-13" rx="28" ry="14" /><ellipse cx="34" cy="-4" rx="20" ry="9" />
+    </g>
+  );
+
+  if (variant === 'sidebar') {
+    return (
+      <svg viewBox="0 0 300 230" preserveAspectRatio="xMidYMax slice" className={className} style={style} aria-hidden="true">
+        {defs}
+        <linearGradient id={gid('fade')} x1="0" y1="0" x2="0" y2="1"><stop offset="0" style={stop('d950', 0)} /><stop offset="1" style={stop('d950', 0.8)} /></linearGradient>
+        <linearGradient id={gid('glow')} x1="0" y1="0" x2="1" y2="0"><stop offset="0" style={stop('a400', 0)} /><stop offset="0.5" style={stop('a300', 1)} /><stop offset="1" style={stop('a400', 0)} /></linearGradient>
+        <Rumah x={18} y={150} w={78} h={44} d={24} gelap o={0.7} />
+        <Rumah x={130} y={132} w={92} h={54} d={28} gelap o={0.6} />
+        <rect x="0" y="0" width="300" height="230" style={{ fill: url('fade') }} />
+        <Daun x={-16} y={236} r={-40} s={1} blur={1} />
+        <Daun x={56} y={240} r={-18} s={0.62} />
+        <Daun x={318} y={238} r={-146} s={0.8} gelap />
+        <path d="M-10 238 C60 196 150 204 320 164" stroke={url('glow')} strokeWidth="3" fill="none" style={{ filter: `drop-shadow(0 0 4px ${v('a400')})` }} />
+      </svg>
+    );
+  }
+
+  if (variant === 'sapaan') {
+    return (
+      <svg viewBox="0 0 760 110" preserveAspectRatio="xMaxYMax slice" className={className} style={style} aria-hidden="true">
+        {defs}
+        <linearGradient id={gid('sky')} x1="0" y1="0" x2="0" y2="1"><stop offset="0" style={stop('d300')} /><stop offset="0.7" style={stop('d100')} /><stop offset="1" stopColor="#ffffff" /></linearGradient>
+        <rect width="760" height="110" style={{ fill: url('sky') }} />
+        <rect width="760" height="110" style={{ fill: url('sun') }} />
+        <Awan x={430} y={24} s={0.8} o={0.85} /><Awan x={640} y={16} s={0.6} o={0.8} />
+        <Pohon x={236} y={94} s={0.7} blur={2} o={0.85} /><Pohon x={318} y={96} s={0.75} blur={1} />
+        <Rumah x={252} y={54} w={62} h={38} d={20} blur={1} o={0.92} />
+        <Rumah x={352} y={46} w={78} h={46} d={24} atap="roofB" />
+        <Pohon x={452} y={96} s={0.8} />
+        <Rumah x={478} y={50} w={72} h={42} d={22} />
+        <Pohon x={596} y={96} s={0.85} />
+        <Rumah x={614} y={44} w={82} h={48} d={26} atap="roofB" />
+        <rect x="0" y="90" width="760" height="20" style={{ fill: url('lawn') }} />
+        <rect x="0" y="90" width="760" height="1.6" style={{ fill: v('a300'), opacity: 0.6 }} />
+        <Semak x={270} y={94} s={0.7} /><Semak x={392} y={94} s={0.85} /><Semak x={512} y={95} s={0.8} /><Semak x={650} y={94} s={0.9} />
+        <Daun x={716} y={118} r={-112} s={1.05} blur={1} />
+        <Daun x={676} y={116} r={-96} s={0.7} gelap />
+      </svg>
+    );
+  }
+
+  if (variant === 'hero') {
+    return (
+      <svg viewBox="0 0 760 300" preserveAspectRatio="xMaxYMax slice" className={className} style={style} aria-hidden="true">
+        {defs}
+        <linearGradient id={gid('sky')} x1="0" y1="0" x2="0" y2="1"><stop offset="0" style={stop('d600')} /><stop offset="0.55" style={stop('d400')} /><stop offset="1" style={stop('d200')} /></linearGradient>
+        <rect width="760" height="300" style={{ fill: url('sky') }} />
+        <rect width="760" height="300" style={{ fill: url('sun') }} />
+        <Awan x={470} y={52} s={1.2} o={0.7} /><Awan x={690} y={92} s={0.95} o={0.6} /><Awan x={300} y={100} s={0.8} o={0.45} />
+        {/* jajaran pohon & rumah jauh (kabur) */}
+        <Pohon x={222} y={228} s={0.9} blur={2} o={0.8} /><Pohon x={286} y={230} s={0.8} blur={2} o={0.85} />
+        <Rumah x={236} y={190} w={50} h={32} d={16} blur={1} o={0.85} />
+        <Rumah x={302} y={184} w={58} h={36} d={18} blur={1} o={0.9} atap="roofB" />
+        {/* rumah tengah */}
+        <Rumah x={382} y={184} w={70} h={44} d={22} />
+        <Pohon x={470} y={236} s={0.85} />
+        <Rumah x={486} y={178} w={82} h={52} d={26} atap="roofB" />
+        {/* tanah, jalan */}
+        <rect x="0" y="228" width="760" height="72" style={{ fill: url('lawn') }} />
+        <rect x="0" y="228" width="760" height="2" style={{ fill: v('a300'), opacity: 0.55 }} />
+        <Semak x={250} y={226} s={0.7} /><Semak x={330} y={224} s={0.75} /><Semak x={412} y={230} s={0.9} /><Semak x={520} y={232} s={1} />
+        <path d="M120 300 L330 232 L560 232 L700 300 Z" style={{ fill: url('road') }} opacity="0.95" />
+        <path d="M330 232 L560 232" stroke="#ffffff" strokeOpacity="0.5" strokeWidth="1" />
+        {/* gerbang perumahan */}
+        <g>
+          <path d="M628 236 h132 v-52 h-132 z" style={{ fill: v('d900'), opacity: 0.35 }} />
+          {Array.from({ length: 12 }).map((_, i) => <line key={i} x1={652 + i * 10} y1="186" x2={652 + i * 10} y2="236" strokeWidth="2" style={{ stroke: v('d800'), opacity: 0.75 }} />)}
+          <rect x="590" y="82" width="66" height="160" rx="3" style={{ fill: url('pilar') }} />
+          <rect x="582" y="72" width="82" height="14" rx="3" style={isi('d800')} />
+          <rect x="586" y="86" width="74" height="4" style={{ fill: '#000', opacity: 0.2 }} />
+          <rect x="600" y="104" width="46" height="60" rx="5" style={{ fill: '#ffffff' }} />
+          <circle cx="623" cy="122" r="10" style={isi('a600')} />
+          <path d="M617 123l3 -6 3-2 3 2 3 6h-3v5h-12v-5z" style={{ fill: '#ffffff' }} />
+          <text x="623" y="153" fontSize="6.6" fontWeight="800" textAnchor="middle" style={isi('d900')}>{label}</text>
+          <rect x="590" y="234" width="66" height="10" style={{ fill: '#000', opacity: 0.22 }} />
+        </g>
+        <ellipse cx="560" cy="248" rx="34" ry="14" style={{ fill: url('fol') }} />
+        <ellipse cx="690" cy="252" rx="46" ry="16" style={{ fill: url('fol') }} />
+        <Pohon x={735} y={262} s={1.15} />
+        <Daun x={760} y={306} r={-118} s={1.05} blur={1} />
+        <Daun x={700} y={310} r={-100} s={0.72} gelap />
+      </svg>
+    );
+  }
+
+  // variant === 'header' (banner tipis di atas halaman Dashboard)
+  return (
+    <svg viewBox="0 0 1200 90" preserveAspectRatio="xMidYMax slice" className={className} style={style} aria-hidden="true">
+      {defs}
+      <linearGradient id={gid('sky')} x1="0" y1="0" x2="0" y2="1"><stop offset="0" style={stop('d700')} /><stop offset="0.55" style={stop('d500')} /><stop offset="1" style={stop('d300')} /></linearGradient>
+      <rect width="1200" height="90" style={{ fill: url('sky') }} />
+      <rect width="1200" height="90" style={{ fill: url('sun') }} />
+      <Awan x={780} y={24} s={0.9} o={0.6} /><Awan x={1060} y={20} s={0.7} o={0.55} /><Awan x={540} y={30} s={0.9} o={0.4} />
+      <Pohon x={470} y={80} s={0.7} blur={2} o={0.8} /><Pohon x={560} y={82} s={0.6} blur={2} o={0.8} />
+      <Rumah x={620} y={46} w={58} h={30} d={18} blur={1} o={0.9} />
+      <Pohon x={716} y={80} s={0.7} />
+      <Rumah x={738} y={40} w={70} h={36} d={22} atap="roofB" />
+      <Rumah x={856} y={44} w={62} h={32} d={20} />
+      <Pohon x={958} y={80} s={0.75} />
+      <Rumah x={978} y={40} w={72} h={36} d={22} atap="roofB" />
+      <Rumah x={1096} y={44} w={64} h={32} d={20} />
+      <Pohon x={1186} y={82} s={0.95} />
+      <rect x="0" y="76" width="1200" height="14" style={{ fill: url('lawn') }} />
+      <rect x="0" y="76" width="1200" height="1.4" style={{ fill: v('a300'), opacity: 0.6 }} />
+      <Semak x={648} y={79} s={0.6} /><Semak x={772} y={80} s={0.7} /><Semak x={886} y={79} s={0.6} /><Semak x={1010} y={80} s={0.7} /><Semak x={1128} y={79} s={0.6} />
+      <Daun x={-14} y={100} r={-52} s={1.15} blur={2} />
+      <Daun x={44} y={98} r={-24} s={0.7} gelap />
+      <Daun x={1214} y={100} r={-142} s={0.7} blur={1} />
+    </svg>
+  );
+}
+
+// Ilustrasi ponsel + gelembung WhatsApp (kartu "Hubungi Pengurus")
+function IlustrasiWhatsapp({ className = '' }) {
+  return (
+    <svg viewBox="0 0 150 130" className={className} aria-hidden="true">
+      <g transform="rotate(12 75 65)">
+        <rect x="42" y="10" width="64" height="112" rx="12" style={{ fill: 'var(--tm-a600)' }} />
+        <rect x="42" y="10" width="64" height="112" rx="12" fill="none" stroke="#fff" strokeOpacity="0.5" strokeWidth="2" />
+        <rect x="49" y="20" width="50" height="86" rx="7" style={{ fill: 'var(--tm-a500)' }} />
+        <circle cx="74" cy="114" r="3" fill="#fff" fillOpacity="0.8" />
+      </g>
+      <circle cx="78" cy="62" r="24" fill="#fff" fillOpacity="0.96" />
+      <path d="M70 55c0 8 9 17 17 17l4-4-6-3-3 2c-3-1-6-4-7-7l2-3-3-6z" style={{ fill: 'var(--tm-a600)' }} />
+      <path d="M78 42a20 20 0 0 0-17.3 30l-2.7 10 10.3-2.7A20 20 0 1 0 78 42z" fill="none" style={{ stroke: 'var(--tm-a600)' }} strokeWidth="3" />
+      <circle cx="26" cy="30" r="5" style={{ fill: 'var(--tm-a300)' }} fillOpacity="0.7" />
+      <circle cx="132" cy="96" r="7" style={{ fill: 'var(--tm-a300)' }} fillOpacity="0.55" />
+    </svg>
+  );
+}
+
+// =====================================================================
+// PILIHAN PALET TEMA WARNA (TOMBOL "TEMA" DI BAR ATAS)
+// =====================================================================
+function PaletTema({ temaAktif, temaBawaan, adalahAdmin, onPilih, onReset }) {
+  const [buka, setBuka] = useState(false);
+  const wrapRef = useRef(null);
+  useEffect(() => {
+    const klikLuar = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setBuka(false); };
+    document.addEventListener('mousedown', klikLuar);
+    document.addEventListener('touchstart', klikLuar);
+    return () => { document.removeEventListener('mousedown', klikLuar); document.removeEventListener('touchstart', klikLuar); };
+  }, []);
+  const tema = cariTema(temaAktif);
+  const sedangDiOverride = !adalahAdmin && temaAktif !== temaBawaan;
+  return (
+    <div className="relative" ref={wrapRef}>
+      <button
+        type="button"
+        onClick={() => setBuka((b) => !b)}
+        aria-label="Ganti tema warna"
+        aria-expanded={buka}
+        className="flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 text-[11px] font-bold text-white transition-colors"
+      >
+        <Ikon nama="palette" className="w-3.5 h-3.5" />
+        <span className="hidden sm:inline">Tema</span>
+        <span className="w-3.5 h-3.5 rounded-full ring-2 ring-white/70" style={{ background: swatchTema(tema) }} />
+      </button>
+      {buka && (
+        <div className="absolute right-0 top-full mt-2 w-72 max-w-[88vw] bg-white text-slate-800 rounded-2xl shadow-2xl border border-slate-200 p-3.5 z-[60] anim-pop font-semibold">
+          <div className="flex items-center justify-between mb-2.5">
+            <p className="text-[11px] font-black text-slate-900 flex items-center gap-1.5"><Ikon nama="palette" className="w-3.5 h-3.5" /> Palet Tema Warna</p>
+            <button type="button" onClick={() => setBuka(false)} className="text-slate-400 hover:text-slate-700" aria-label="Tutup"><Ikon nama="x" className="w-4 h-4" /></button>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {TEMA_WARNA.map((t) => {
+              const aktif = t.id === temaAktif;
+              return (
+                <button
+                  type="button"
+                  key={t.id}
+                  onClick={() => onPilih(t.id)}
+                  className={`flex flex-col items-center gap-1.5 rounded-xl border p-2 transition-all duration-150 ${aktif ? 'border-slate-800 bg-slate-50 shadow-sm' : 'border-slate-200 hover:border-slate-400 hover:bg-slate-50'}`}
+                >
+                  <span className="relative w-9 h-9 rounded-full shadow-inner ring-2 ring-white" style={{ background: swatchTema(t) }}>
+                    {aktif && <span className="absolute inset-0 flex items-center justify-center text-white"><Ikon nama="check" className="w-4 h-4" strokeWidth={3} /></span>}
+                  </span>
+                  <span className="text-[10px] leading-tight text-center text-slate-700 font-bold">{t.nama}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-3 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-[10px] leading-relaxed text-slate-500 font-medium">
+            {adalahAdmin ? (
+              <><b className="text-slate-700">Mode Admin:</b> tema yang Anda pilih menjadi <b>tema bawaan</b> dan langsung berganti untuk <b>semua pengunjung &amp; warga</b>.</>
+            ) : (
+              <>Pilihan ini hanya mengubah tampilan <b>di layar Anda saat ini</b>. Tema bawaan untuk semua orang diatur oleh admin.</>
+            )}
+          </div>
+          {sedangDiOverride && (
+            <button type="button" onClick={() => { onReset(); setBuka(false); }} className="mt-2 w-full text-[10px] font-black text-slate-600 hover:text-slate-900 underline underline-offset-2">
+              Kembali ke tema bawaan ({cariTema(temaBawaan).nama})
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
+// PAGINASI BUKU KAS RT
+// -----------------------------------------------------------
+// Halaman 1 = 10 transaksi TERAKHIR (paling baru); halaman 2, 3, dst =
+// 10 transaksi sebelumnya. Yang berganti hanya baris riwayat pencatatan;
+// kotak "Sisa Saldo Kas RT" tetap di bawah dan selalu menampilkan saldo
+// terkini (dihitung dari seluruh data, bukan dari halaman yang dibuka).
+// Urutan baris di dalam satu halaman tetap kronologis (saldo berjalan
+// terbaca dari atas ke bawah).
+// =====================================================================
+function PaginasiKas({ data, ukuran = 10, gaya = 'terang', children }) {
+  const total = data.length;
+  const totalHal = Math.max(1, Math.ceil(total / ukuran));
+  const [hal, setHal] = useState(1);
+  const halAman = Math.min(Math.max(1, hal), totalHal);
+  useEffect(() => { if (hal > totalHal) setHal(totalHal); }, [hal, totalHal]);
+  const akhir = total - (halAman - 1) * ukuran;
+  const awal = Math.max(0, akhir - ukuran);
+  const baris = data.slice(awal, akhir);
+
+  // daftar nomor halaman (dengan titik-titik kalau terlalu banyak)
+  const nomor = [];
+  if (totalHal <= 7) { for (let i = 1; i <= totalHal; i++) nomor.push(i); }
+  else {
+    nomor.push(1);
+    if (halAman > 3) nomor.push('...');
+    for (let i = Math.max(2, halAman - 1); i <= Math.min(totalHal - 1, halAman + 1); i++) nomor.push(i);
+    if (halAman < totalHal - 2) nomor.push('...');
+    nomor.push(totalHal);
+  }
+  const gelap = gaya === 'gelap';
+  const tombolDasar = gelap
+    ? 'bg-blue-950/60 text-blue-100 border border-blue-800 hover:bg-blue-900'
+    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50';
+  const tombolAktif = gelap ? 'bg-emerald-500 text-white border border-emerald-400' : 'bg-emerald-600 text-white border border-emerald-600';
+  const teksInfo = gelap ? 'text-blue-200' : 'text-slate-400';
+
+  return (
+    <>
+      {children(baris, { awal, akhir, halaman: halAman })}
+      {total > ukuran && (
+        <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <p className={`text-[10px] font-semibold ${teksInfo} text-center sm:text-left`}>
+            Halaman {halAman} dari {totalHal} • Transaksi ke-{awal + 1} s/d {akhir} dari {total}
+            {halAman === 1 && <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-black ${gelap ? 'bg-amber-400/20 text-amber-300' : 'bg-amber-100 text-amber-700'}`}>Terbaru</span>}
+          </p>
+          <div className="flex items-center gap-1">
+            <button type="button" disabled={halAman <= 1} onClick={() => setHal(halAman - 1)} aria-label="Halaman lebih baru" className={`w-7 h-7 rounded-lg flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed ${tombolDasar}`}><Ikon nama="chevL" className="w-3.5 h-3.5" strokeWidth={2.5} /></button>
+            {nomor.map((n, i) => (n === '...'
+              ? <span key={`t${i}`} className={`px-1 text-[11px] font-bold ${teksInfo}`}>…</span>
+              : <button type="button" key={n} onClick={() => setHal(n)} className={`min-w-[28px] h-7 px-1.5 rounded-lg text-[11px] font-black ${n === halAman ? tombolAktif : tombolDasar}`}>{n}</button>))}
+            <button type="button" disabled={halAman >= totalHal} onClick={() => setHal(halAman + 1)} aria-label="Halaman lebih lama" className={`w-7 h-7 rounded-lg flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed ${tombolDasar}`}><Ikon nama="chevR" className="w-3.5 h-3.5" strokeWidth={2.5} /></button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// =====================================================================
+// KARTU VISI / MISI (dipakai di Web Utama & Dashboard Warga)
+// =====================================================================
+function KartuVisiMisi({ judul, teks, ikon, ramp = 'd', panah = false, onKlik }) {
+  const Pembungkus = onKlik ? 'button' : 'div';
+  return (
+    <Pembungkus
+      {...(onKlik ? { type: 'button', onClick: onKlik } : {})}
+      className={`relative overflow-hidden rounded-3xl border border-white shadow-md p-4 flex gap-3 text-left ${onKlik ? 'transition-transform duration-150 hover:-translate-y-0.5 hover:shadow-lg' : ''}`}
+      style={{ background: `linear-gradient(135deg, #ffffff 28%, var(--tm-${ramp}100))` }}
+    >
+      <svg className="absolute -right-4 -bottom-4 w-28 h-28 pointer-events-none" viewBox="0 0 100 100" aria-hidden="true">
+        <circle cx="60" cy="60" r="42" fill="none" style={{ stroke: `var(--tm-${ramp}200)` }} strokeWidth="7" />
+        <circle cx="60" cy="60" r="27" fill="none" style={{ stroke: `var(--tm-${ramp}200)` }} strokeWidth="7" />
+        <circle cx="60" cy="60" r="12" style={{ fill: `var(--tm-${ramp}200)` }} />
+      </svg>
+      <div className="relative w-10 h-10 shrink-0 rounded-full grid place-items-center text-white shadow-lg ring-[3px] ring-white" style={{ background: `linear-gradient(135deg, var(--tm-${ramp}500), var(--tm-${ramp}700))` }}>
+        <Ikon nama={ikon} className="w-5 h-5" />
+      </div>
+      <div className="relative min-w-0 flex-1 pr-6">
+        <h4 className="text-[13px] font-black tracking-wide" style={{ color: `var(--tm-${ramp}800)` }}>{judul}</h4>
+        <p className="mt-0.5 text-[11.5px] leading-relaxed text-slate-600 font-medium">{teks}</p>
+      </div>
+      {panah && (
+        <span className="absolute top-3 right-3 w-6 h-6 rounded-full grid place-items-center bg-white shadow" style={{ color: `var(--tm-${ramp}600)` }}>
+          <Ikon nama="arrowRight" className="w-3.5 h-3.5" strokeWidth={2.5} />
+        </span>
+      )}
+    </Pembungkus>
+  );
+}
+
 export default function IuranWargaRTApp() {
   // ==========================================
   // GLOBAL STYLE (di-inject hanya di client, lihat penjelasan di komentar
@@ -449,6 +1005,20 @@ export default function IuranWargaRTApp() {
       .lightbox-img-box { animation: lightboxPopIn 0.25s ease both; }
       .lightbox-img { transition: transform 0.3s ease; cursor: zoom-in; }
       .lightbox-img.is-zoomed { cursor: zoom-out; }
+      /* ===== TEMA WARNA: pengalihan kelas warna lama ke variabel tema (lihat buatCssTema) ===== */
+      ${buatCssTema()}
+      /* ===== TAMBAHAN TAMPILAN BARU ===== */
+      .app-root .font-tulisan { font-family: 'Caveat', 'Segoe Script', 'Brush Script MT', cursive; }
+      .app-root .menu-btn { display: flex; align-items: center; gap: 0.75rem; }
+      .app-root .menu-aktif {
+        background-image: linear-gradient(90deg, var(--tm-a600), var(--tm-a500)) !important;
+        box-shadow: 0 0 0 1.5px rgba(255,255,255,0.55), 0 0 16px var(--tm-a400) !important;
+        color: #fff !important;
+      }
+      .app-root nav .menu-btn.py-3 { padding-top: 0.55rem; padding-bottom: 0.55rem; }
+      .app-root .tm-input:focus { outline: none; border-color: var(--tm-a500); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tm-a500) 22%, transparent); }
+      .app-root .tm-btn-utama { background-image: linear-gradient(90deg, var(--tm-d700), var(--tm-a600)); transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease; }
+      .app-root .tm-btn-utama:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.06); box-shadow: 0 12px 24px -10px var(--tm-a600); }
     `;
     document.head.appendChild(styleEl);
   }, []);
@@ -630,6 +1200,14 @@ export default function IuranWargaRTApp() {
   const [notifikasiList, setNotifikasiList] = useState([]);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
 
+  // TEMA WARNA LOKAL - pilihan pengunjung/warga yang HANYA berlaku di layar
+  // mereka sendiri saat itu (tidak disimpan). null = ikut tema bawaan admin.
+  const [temaLokal, setTemaLokal] = useState(null);
+  // Banner "ini cuma simulasi" di Dashboard bisa ditutup (tombol X).
+  const [tutupBannerSimulasi, setTutupBannerSimulasi] = useState(false);
+  // Ikon mata (lihat/sembunyikan) pada kolom password form Login.
+  const [lihatPasswordLogin, setLihatPasswordLogin] = useState(false);
+
   // ==========================================
   // 1. STATE MANAGEMENT CMS WEBSITE
   // ==========================================
@@ -644,6 +1222,9 @@ export default function IuranWargaRTApp() {
     infoKontak: '0822-9728-1391',
     fotoLatarRT: null,
     logoRT: null,
+    // TEMA WARNA BAWAAN (diatur Admin lewat tombol "Tema" di bar atas, ikut
+    // tersimpan & tersinkron ke semua akun bersama pengaturan CMS lain).
+    temaWarna: TEMA_DEFAULT_ID,
     // TANDA TANGAN DIGITAL BENDAHARA RT - URL gambar tanda tangan (upload dari
     // Admin, lihat handleTandaTanganChange) yang tampil di Kuitansi Digital
     // menggantikan cap/stempel bulat lama. Kalau kosong (belum diupload),
@@ -4680,7 +5261,7 @@ export default function IuranWargaRTApp() {
   // ==========================================
   const BadgeStatus = ({ status }) => {
     const style = status === 'LUNAS'
-      ? 'bg-emerald-100 text-emerald-700'
+      ? 'bg-[#d1fae5] text-[#047857]'
       : status === 'MENUNGGU VERIFIKASI'
       ? 'bg-amber-100 text-amber-700'
       : 'bg-slate-100 text-slate-500';
@@ -4716,6 +5297,42 @@ export default function IuranWargaRTApp() {
   );
 
   // ==========================================
+  // TEMA WARNA AKTIF
+  // -----------------------------------------------------------
+  // - Admin (adminLoggedIn): selalu melihat & mengatur TEMA BAWAAN. Memilih
+  //   tema di palet = mengganti tema bawaan untuk SEMUA orang (disimpan ke
+  //   cmsTeks.temaWarna + sheet "Pengaturan").
+  // - Pengunjung / warga: memilih tema hanya mengubah `temaLokal` (sementara,
+  //   hilang saat halaman dibuka ulang). Tema admin tetap jadi bawaan.
+  // ==========================================
+  const temaBawaan = idTemaValid(cmsTeks.temaWarna);
+  const temaEfektif = adminLoggedIn ? temaBawaan : (temaLokal ? idTemaValid(temaLokal) : temaBawaan);
+  const temaStyle = { ...buatVariabelTema(temaEfektif), backgroundColor: 'color-mix(in srgb, var(--tm-d50) 55%, #ffffff)' };
+  const handlePilihTema = (idBaru) => {
+    const id = idTemaValid(idBaru);
+    if (adminLoggedIn) {
+      const teksBaru = { ...cmsTeks, temaWarna: id };
+      setCmsTeks(teksBaru);
+      setCmsForm(prev => ({ ...prev, temaWarna: id }));
+      setTemaLokal(null);
+      if (teksBaru.appsScriptUrl) {
+        syncSheet('Pengaturan', [{
+          ...teksBaru,
+          syaratList: (teksBaru.syaratList || []).join('|'),
+          ketentuanList: (teksBaru.ketentuanList || []).join('|'),
+          asetRTList: (teksBaru.asetRTList || []).join('|'),
+          infoPengumumanList: (teksBaru.infoPengumumanList || []).join('|'),
+          daftarBlokRumahList: (teksBaru.daftarBlokRumahList || []).join('|'),
+          daftarNomorRumahList: (teksBaru.daftarNomorRumahList || []).join('|'),
+        }]);
+      }
+      showToast(`Tema bawaan diganti ke "${cariTema(id).nama}" - langsung berlaku untuk semua pengunjung & warga.`);
+    } else {
+      setTemaLokal(id);
+    }
+  };
+
+  // ==========================================
   // KOMPONEN: IKON LONCENG NOTIFIKASI + BADGE ANGKA BELUM DIBACA + DROPDOWN
   // -----------------------------------------------------------
   // Dipakai di header Dashboard Warga (role user) & Admin Panel (role
@@ -4727,9 +5344,9 @@ export default function IuranWargaRTApp() {
       <button
         onClick={() => setShowNotifDropdown(prev => !prev)}
         aria-label="Notifikasi"
-        className="relative w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-lg transition-colors duration-150"
+        className="relative w-11 h-11 rounded-full bg-white hover:bg-slate-50 border border-slate-200 shadow-md flex items-center justify-center text-blue-700 transition-colors duration-150"
       >
-        🔔
+        <Ikon nama="bell" className="w-5 h-5" />
         {jumlahNotifBelumDibaca > 0 && (
           <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[9px] font-black w-4.5 h-4.5 min-w-[18px] min-h-[18px] rounded-full flex items-center justify-center border-2 border-white anim-pop">
             {jumlahNotifBelumDibaca > 9 ? '9+' : jumlahNotifBelumDibaca}
@@ -4775,7 +5392,7 @@ export default function IuranWargaRTApp() {
   );
 
   return (
-    <div className="app-root bg-slate-50 min-h-screen text-slate-800 antialiased font-sans">
+    <div className="app-root min-h-screen text-slate-800 antialiased font-sans" style={temaStyle}>
       {/*
         FONT DIMUAT LEWAT <link>, BUKAN @import DI DALAM <style>.
         Sebelumnya @import url(...) diletakkan di dalam teks <style>, dan proxy preview
@@ -4789,7 +5406,7 @@ export default function IuranWargaRTApp() {
       <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       <link
         rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800;900&family=Roboto:wght@400;500;700;900&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800;900&family=Roboto:wght@400;500;700;900&family=Caveat:wght@600;700&display=swap"
       />
 
       {/* OVERLAY "MASIH DALAM PROSES" - tampil SELAMA proses tarik data
@@ -4912,6 +5529,13 @@ export default function IuranWargaRTApp() {
               <button onClick={handleAdminLogout} className="text-[10px] font-bold text-slate-500 hover:text-rose-400 underline underline-offset-2 ml-1">Keluar Admin</button>
             </>
           )}
+          <PaletTema
+            temaAktif={temaEfektif}
+            temaBawaan={temaBawaan}
+            adalahAdmin={adminLoggedIn}
+            onPilih={handlePilihTema}
+            onReset={() => setTemaLokal(null)}
+          />
         </div>
       </div>
 
@@ -4974,83 +5598,110 @@ export default function IuranWargaRTApp() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="md:col-span-2 space-y-6">
-              <div className="relative bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white p-8 rounded-3xl border shadow-xl overflow-hidden">
-                {cmsTeks.fotoLatarRT ? (
-                  <img loading="lazy" decoding="async" src={cmsTeks.fotoLatarRT} alt="RT" className="absolute inset-0 w-full h-full object-cover opacity-40 pointer-events-none select-none" onError={(e) => { e.target.style.display = 'none'; }} />
-                ) : (
-                  <RTSilhouette className="absolute -bottom-4 right-0 w-2/3 h-40 text-emerald-500/10 pointer-events-none select-none" />
+              <div className="relative rounded-3xl overflow-hidden shadow-xl border border-white/50 text-white bg-blue-900">
+                {/* LATAR: ilustrasi gerbang & rumah (mengikuti tema). Kalau admin sudah
+                    upload Foto Latar di CMS, foto itu tampil di atas ilustrasi. */}
+                <AdeganPerumahan variant="hero" label={(cmsTeks.namaRT || '').match(/^RT\s*\d+\s*RW\s*\d+/i)?.[0] || 'RT'} className="absolute inset-0 w-full h-full pointer-events-none select-none" />
+                {cmsTeks.fotoLatarRT && (
+                  <img loading="lazy" decoding="async" src={cmsTeks.fotoLatarRT} alt="RT" className="absolute inset-0 w-full h-full object-cover pointer-events-none select-none" onError={(e) => { e.target.style.display = 'none'; }} />
                 )}
-                {/* Overlay gelap dibuat ~20% lebih transparan dari sebelumnya (60%->40% & 80%->60%)
-                    supaya foto latar yang diupload admin lebih terlihat jelas, teks tetap dijaga
-                    kontrasnya lewat drop-shadow & kotak pengumuman semi-solid di bawah. */}
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-900/40 to-transparent pointer-events-none"></div>
-                <div className="relative">
-                  <h2 className="text-xl font-black text-amber-300 mb-2 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">{cmsTeks.judulBeranda}</h2>
-                  <p className="text-[11px] text-emerald-300 font-bold uppercase tracking-widest mb-3 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">{cmsTeks.tagline}</p>
-                  <div className="text-xs bg-blue-950/50 backdrop-blur-sm p-4 rounded-xl border border-blue-400/30 marquee-wrap">
-                    {/* RUNNING TEXT (MARQUEE) - teks pengumuman berjalan terus-menerus dari
-                        kanan ke kiri secara loop tanpa putus, supaya kotak pengumuman di
-                        Beranda selalu terlihat "hidup" & lebih menarik perhatian warga.
-                        Durasi animasi disesuaikan otomatis mengikuti panjang teks supaya
-                        kecepatan jalannya tetap terasa wajar walau teksnya pendek/panjang.
-                        Background navy transparan + teks warna menyala (amber/gold glow)
-                        supaya tetap senada dengan tema navy di sekitarnya tapi tetap
-                        menonjol/mudah dibaca. */}
-                    <div
-                      className="marquee-track leading-relaxed text-amber-300 font-bold drop-shadow-[0_0_6px_rgba(252,211,77,0.65)]"
-                      style={{ animationDuration: `${Math.max(12, (cmsTeks.pengumuman || '').length * 0.09)}s` }}
-                    >
-                      <span>{cmsTeks.pengumuman}</span>
-                      <span>{cmsTeks.pengumuman}</span>
-                    </div>
+                <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(90deg, color-mix(in srgb, var(--tm-d950) 94%, transparent) 0%, color-mix(in srgb, var(--tm-d900) 78%, transparent) 42%, color-mix(in srgb, var(--tm-d900) 10%, transparent) 78%, transparent 100%)' }}></div>
+                <div className="absolute inset-0 sm:hidden pointer-events-none" style={{ background: 'color-mix(in srgb, var(--tm-d950) 52%, transparent)' }}></div>
+                <div className="relative p-5 sm:p-6 min-h-[240px] flex flex-col">
+                  <div className="max-w-[27rem]">
+                    <h2 className="text-[22px] sm:text-[26px] leading-[1.15] font-black drop-shadow-[0_2px_6px_rgba(0,0,0,0.35)]">
+                      {(() => {
+                        const judul = cmsTeks.judulBeranda || '';
+                        const pisah = judul.match(/^(.*?)\s+(Lebih\s+)(.+)$/i);
+                        const gayaSorot = { background: 'linear-gradient(90deg, var(--tm-a300), var(--tm-a400))', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' };
+                        if (!pisah) return judul;
+                        return (
+                          <>
+                            <span className="block">{pisah[1]}</span>
+                            <span className="block">{pisah[2]}<span style={gayaSorot}>{pisah[3]}</span></span>
+                          </>
+                        );
+                      })()}
+                    </h2>
+                    <p className="mt-2 text-[12px] sm:text-[13px] text-white/85 font-medium leading-relaxed">{cmsTeks.tagline}</p>
                   </div>
-                  {/* TEKS KECIL PROMOSI JASA WEBSITE - tampil di bawah kotak running
-                      text pengumuman RT, di halaman Web Utama saja. */}
-                  <p className="text-[9px] text-blue-300/80 text-center mt-2 leading-relaxed drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">
+
+                  {/* KOTAK INFO PEMBAYARAN + RUNNING TEXT PENGUMUMAN (dari CMS) + tombol panduan */}
+                  <div className="mt-auto pt-4">
+                  <div className="rounded-2xl border border-white/25 bg-white/10 backdrop-blur-md px-3 py-2 flex flex-col sm:flex-row sm:items-center gap-3 lg:max-w-[82%]">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <span className="w-8 h-8 shrink-0 rounded-lg bg-white/15 border border-white/25 grid place-items-center"><Ikon nama="card" className="w-4 h-4" /></span>
+                      {/* RUNNING TEXT (MARQUEE) - teks pengumuman berjalan terus-menerus dari
+                          kanan ke kiri; durasi mengikuti panjang teks supaya kecepatannya wajar. */}
+                      <div className="marquee-wrap flex-1 min-w-0 text-[12px] font-semibold text-white">
+                        <div className="marquee-track leading-relaxed" style={{ animationDuration: `${Math.max(12, (cmsTeks.pengumuman || '').length * 0.09)}s` }}>
+                          <span>{cmsTeks.pengumuman}</span>
+                          <span>{cmsTeks.pengumuman}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { const el = document.getElementById('panduan-pembayaran'); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}
+                      className="shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl bg-white text-blue-900 hover:bg-blue-50 text-[11px] font-black px-3 py-2 shadow-lg transition-transform duration-150 hover:scale-[1.02]"
+                    >
+                      Lihat Panduan Pembayaran <Ikon nama="arrowRight" className="w-3.5 h-3.5" strokeWidth={2.6} />
+                    </button>
+                  </div>
+                  {/* TEKS KECIL PROMOSI JASA WEBSITE */}
+                  <p className="text-[9px] text-white/70 mt-3 leading-relaxed drop-shadow-[0_1px_3px_rgba(0,0,0,0.6)]">
                     Butuh Website untuk Usaha Kamu? Hubungi saya untuk diskusi konsep &amp; penawaran harga WA{' '}
                     <a href="https://wa.me/6282421117131" target="_blank" rel="noopener noreferrer" className="underline font-bold hover:text-amber-300 transition-colors">0822421117131</a>
                   </p>
+                  </div>
                 </div>
               </div>
 
               {/* REKENING PEMBAYARAN & KONTAK PANITIA */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div className="bg-white p-5 rounded-2xl border">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Rekening Pembayaran Resmi</h4>
-                  <p className="text-emerald-800 font-black text-sm leading-relaxed">{cmsTeks.noRekening}</p>
+              <div id="panduan-pembayaran" className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs scroll-mt-4">
+                <div className="relative overflow-hidden rounded-3xl border border-white shadow-md p-4" style={{ background: 'linear-gradient(135deg, #ffffff 45%, var(--tm-d100))' }}>
+                  <span className="absolute -right-3 -bottom-3 pointer-events-none" style={{ color: 'var(--tm-d200)' }}><Ikon nama="landmark" className="w-24 h-24" strokeWidth={1.2} /></span>
+                  <div className="relative flex items-center gap-3">
+                    <span className="w-10 h-10 rounded-xl grid place-items-center text-white shadow-lg" style={{ background: 'linear-gradient(135deg, var(--tm-d500), var(--tm-d800))' }}><Ikon nama="landmark" className="w-[18px] h-[18px]" /></span>
+                    <h4 className="text-[14px] font-black text-slate-900 leading-tight">Rekening Pembayaran Resmi</h4>
+                  </div>
+                  <p className="relative mt-2.5 text-[12.5px] font-black leading-relaxed" style={{ color: 'var(--tm-d900)' }}>{cmsTeks.noRekening}</p>
                   <button
                     type="button"
                     onClick={() => { navigator.clipboard?.writeText(cmsTeks.noRekening); showToast('Nomor rekening berhasil disalin.'); }}
-                    className="mt-2 text-[10px] font-bold text-slate-500 hover:text-emerald-700 underline underline-offset-2"
+                    className="relative mt-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-50 hover:text-emerald-700 transition-colors"
                   >
-                    📋 Salin Nomor Rekening
+                    <Ikon nama="copy" className="w-3.5 h-3.5" /> Salin Nomor Rekening
                   </button>
-                  <p className="text-[10px] text-slate-400 mt-2">Pastikan hanya transfer ke rekening resmi di atas. Nomor ini diatur langsung oleh panitia lewat Admin Panel.</p>
+                  <div className="relative mt-3 flex items-start gap-2 rounded-xl px-3 py-2 text-[10px] leading-relaxed text-slate-500 font-medium" style={{ background: 'var(--tm-a50)' }}>
+                    <Ikon nama="info" className="w-4 h-4 shrink-0 mt-px text-emerald-600" />
+                    <span>Pastikan hanya transfer ke rekening resmi di atas. Nomor ini diatur langsung oleh panitia lewat Admin Panel.</span>
+                  </div>
                 </div>
-                <div className="bg-white p-5 rounded-2xl border">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Hubungi Pengurus</h4>
-                  <p className="text-slate-700 font-bold">{cmsTeks.infoKontak}</p>
+
+                <div className="relative overflow-hidden rounded-3xl border border-white shadow-md p-4" style={{ background: 'linear-gradient(135deg, #ffffff 40%, var(--tm-a100))' }}>
+                  <IlustrasiWhatsapp className="absolute right-0 bottom-0 w-28 h-24 pointer-events-none" />
+                  <div className="relative flex items-center gap-3">
+                    <span className="w-10 h-10 rounded-xl grid place-items-center text-white shadow-lg" style={{ background: 'linear-gradient(135deg, var(--tm-d500), var(--tm-d800))' }}><Ikon nama="phone" className="w-[18px] h-[18px]" /></span>
+                    <h4 className="text-[14px] font-black text-slate-900 leading-tight">Hubungi Pengurus</h4>
+                  </div>
+                  <p className="relative mt-2.5 text-[18px] font-black tracking-wide text-slate-900">{cmsTeks.infoKontak}</p>
                   <a
                     href={buatLinkWhatsapp(cmsTeks.infoKontak)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-2 inline-flex items-center gap-1.5 bg-gradient-to-r from-blue-950 via-blue-900 to-blue-950 hover:from-blue-900 hover:via-blue-800 hover:to-blue-900 text-white font-bold text-[11px] px-3 py-1.5 rounded-full transition-colors duration-200"
+                    className="relative mt-2.5 inline-flex items-center gap-2 rounded-xl text-white font-black text-[11.5px] pl-3 pr-3.5 py-2 shadow-lg transition-transform duration-150 hover:-translate-y-0.5"
+                    style={{ background: 'linear-gradient(90deg, var(--tm-a600), var(--tm-a500))' }}
                   >
-                    Chat via WhatsApp
+                    <IkonWhatsapp className="w-5 h-5" /> Chat via WhatsApp <Ikon nama="arrowRight" className="w-3.5 h-3.5" strokeWidth={2.6} />
                   </a>
                 </div>
               </div>
 
               {/* VISI & MISI */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div className="bg-white p-5 rounded-2xl border">
-                  <h4 className="font-black text-emerald-800 uppercase tracking-wider mb-2">Visi</h4>
-                  <p className="text-slate-600 leading-relaxed font-medium">{cmsTeks.visi}</p>
-                </div>
-                <div className="bg-white p-5 rounded-2xl border">
-                  <h4 className="font-black text-emerald-800 uppercase tracking-wider mb-2">Misi</h4>
-                  <p className="text-slate-600 leading-relaxed font-medium">{cmsTeks.misi}</p>
-                </div>
+                <KartuVisiMisi judul="VISI" teks={cmsTeks.visi} ikon="target" ramp="d" />
+                <KartuVisiMisi judul="MISI" teks={cmsTeks.misi} ikon="users" ramp="a" />
               </div>
 
               {/* SYARAT & KETENTUAN */}
@@ -5263,37 +5914,67 @@ export default function IuranWargaRTApp() {
             {/* KOLOM KANAN: LOGIN, PENDAFTARAN, & INFO MOTIVASI WARGA */}
             <div className="col-span-1 space-y-6">
 
-              {/* FORM LOGIN RESMI (USERNAME & PASSWORD) */}
-              <div className="bg-white rounded-3xl border shadow-xs h-fit overflow-hidden">
-                {/* HEADER NAVY GRADASI (senada dengan sidebar) + teks warna menyala
-                    supaya kartu Login lebih menonjol & terlihat konsisten dengan
-                    tema navy di seluruh halaman. */}
-                <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 px-6 py-4">
-                  <h3 className="text-sm font-black text-amber-300 text-center mb-1 drop-shadow-[0_0_6px_rgba(252,211,77,0.5)]">Login Akun Warga / Admin</h3>
-                  <p className="text-[10px] text-blue-200 text-center">Satu form untuk semua akun: warga masuk dengan username &amp; password yang dikirim ke WA saat aktivasi, Panitia/Admin masuk dengan akun Super Admin.</p>
+              {/* FORM LOGIN RESMI (USERNAME & PASSWORD) - gaya kartu biru + isi putih */}
+              <div className="bg-white rounded-3xl border border-white shadow-xl h-fit overflow-hidden">
+                <div className="relative px-5 py-4 text-white overflow-hidden" style={{ background: 'linear-gradient(120deg, var(--tm-d950), var(--tm-d800) 62%, var(--tm-d600))' }}>
+                  <span className="absolute -right-8 -top-10 w-40 h-40 rounded-full bg-white/10 pointer-events-none"></span>
+                  <span className="absolute right-10 -bottom-10 w-28 h-28 rounded-full bg-white/10 pointer-events-none"></span>
+                  <div className="relative flex items-center gap-3">
+                    <span className="w-12 h-12 shrink-0 rounded-2xl bg-white/15 border border-white/25 grid place-items-center shadow-inner"><Ikon nama="user" className="w-6 h-6" /></span>
+                    <div className="min-w-0">
+                      <h3 className="text-[15px] font-black leading-tight">Login Akun Warga / Admin</h3>
+                      <p className="text-[10px] text-blue-100 mt-1 leading-snug">Satu form untuk semua akun: warga masuk dengan username &amp; password yang dikirim ke WA saat aktivasi, Panitia/Admin masuk dengan akun Super Admin.</p>
+                    </div>
+                  </div>
                 </div>
-                <div className="p-6">
-                <form onSubmit={handleLogin} className="space-y-3 text-xs font-semibold">
-                  <div><label className="block mb-1 text-slate-600">Username</label><input type="text" required placeholder="hidayat123" value={formLogin.username} onChange={(e) => setFormLogin({...formLogin, username: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
-                  <div><label className="block mb-1 text-slate-600">Password</label><input type="password" required placeholder="••••••••" value={formLogin.password} onChange={(e) => setFormLogin({...formLogin, password: e.target.value})} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
+                <div className="p-5">
+                <form onSubmit={handleLogin} className="space-y-3.5 text-xs font-semibold">
+                  <div>
+                    <label className="flex items-center gap-1.5 mb-1.5 text-slate-700 font-black"><Ikon nama="user" className="w-3.5 h-3.5 text-emerald-600" />Username</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"><Ikon nama="user" className="w-4 h-4" /></span>
+                      <input type="text" required placeholder="Masukkan username Anda" value={formLogin.username} onChange={(e) => setFormLogin({...formLogin, username: e.target.value})} className="tm-input w-full border border-slate-200 pl-9 pr-3 py-2.5 rounded-xl bg-slate-50" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="flex items-center gap-1.5 mb-1.5 text-slate-700 font-black"><Ikon nama="lock" className="w-3.5 h-3.5 text-emerald-600" />Password</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"><Ikon nama="lock" className="w-4 h-4" /></span>
+                      <input type={lihatPasswordLogin ? 'text' : 'password'} required placeholder="Masukkan password Anda" value={formLogin.password} onChange={(e) => setFormLogin({...formLogin, password: e.target.value})} className="tm-input w-full border border-slate-200 pl-9 pr-10 py-2.5 rounded-xl bg-slate-50" />
+                      <button type="button" onClick={() => setLihatPasswordLogin(v => !v)} aria-label={lihatPasswordLogin ? 'Sembunyikan password' : 'Lihat password'} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"><Ikon nama={lihatPasswordLogin ? 'eyeOff' : 'eye'} className="w-4 h-4" /></button>
+                    </div>
+                  </div>
                   {isLoggingIn && <p className="text-[11px] font-bold text-amber-600 flex items-center gap-1.5"><span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></span>Memuat data dari server, mohon tunggu...</p>}
                   {loginError && <p className="text-[11px] font-bold text-rose-600">{loginError}</p>}
-                  <button type="submit" disabled={isLoggingIn} className="w-full bg-emerald-700 text-white font-bold p-2.5 rounded-xl transition-transform duration-150 hover:scale-[1.01] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100">{isLoggingIn ? 'Memuat...' : '🔑 Masuk ke Akun Saya'}</button>
+                  <button type="submit" disabled={isLoggingIn} className="tm-btn-utama w-full text-white font-black py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg disabled:opacity-60 disabled:cursor-not-allowed">
+                    <Ikon nama="key" className="w-4 h-4" />{isLoggingIn ? 'Memuat...' : 'Masuk ke Akun Saya'}<Ikon nama="arrowRight" className="w-4 h-4" strokeWidth={2.6} />
+                  </button>
                 </form>
                 </div>
               </div>
 
-              {/* FORM PENDAFTARAN */}
-              <div className="bg-white rounded-3xl border shadow-xs h-fit overflow-hidden">
-                {/* HEADER NAVY GRADASI (senada dengan sidebar) + teks warna menyala,
-                    konsisten dengan kartu Login di atasnya. */}
-                <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 px-6 py-4">
-                  <h3 className="text-sm font-black text-amber-300 text-center mb-1 drop-shadow-[0_0_6px_rgba(252,211,77,0.5)]">Pendaftaran Akun</h3>
-                  <p className="text-[10px] text-blue-200 text-center">Setelah diaktivasi bendahara, username &amp; password acak akan dikirim ke WA Anda.</p>
+              {/* FORM PENDAFTARAN - gaya kartu biru + isi putih, konsisten dengan kartu Login di atasnya. */}
+              <div className="bg-white rounded-3xl border border-white shadow-xl h-fit overflow-hidden">
+                <div className="relative px-5 py-4 text-white overflow-hidden" style={{ background: 'linear-gradient(120deg, var(--tm-d950), var(--tm-d800) 62%, var(--tm-d600))' }}>
+                  <span className="absolute -right-8 -top-10 w-40 h-40 rounded-full bg-white/10 pointer-events-none"></span>
+                  <span className="absolute right-3 top-2 text-white/25 pointer-events-none"><Ikon nama="clipboard" className="w-20 h-20" strokeWidth={1.3} /></span>
+                  <div className="relative flex items-center gap-3">
+                    <span className="w-12 h-12 shrink-0 rounded-2xl bg-white/15 border border-white/25 grid place-items-center shadow-inner"><Ikon nama="userPlus" className="w-6 h-6" /></span>
+                    <div className="min-w-0 pr-16">
+                      <h3 className="text-[15px] font-black leading-tight">Pendaftaran Akun</h3>
+                      <p className="text-[10px] text-blue-100 mt-1 leading-snug">Setelah diaktivasi bendahara, username &amp; password acak akan dikirim ke WA Anda.</p>
+                    </div>
+                  </div>
                 </div>
-                <div className="p-6">
+                <div className="p-5">
                 <form onSubmit={handleUserMendaftar} className="space-y-3 text-xs font-semibold">
-                  <div><label className="block mb-1 text-slate-600">Nama Kepala Keluarga</label><input type="text" required placeholder="Hidayat" value={formDaftar.nama} onChange={(e) => handleUbahNamaKepalaKeluarga(e.target.value)} className="w-full border p-2 rounded-xl bg-slate-50" /></div>
+                  <div>
+                    <label className="flex items-center gap-1.5 mb-1.5 text-slate-700 font-black"><Ikon nama="user" className="w-3.5 h-3.5 text-emerald-600" />Nama Kepala Keluarga</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"><Ikon nama="user" className="w-4 h-4" /></span>
+                      <input type="text" required placeholder="Masukkan nama kepala keluarga" value={formDaftar.nama} onChange={(e) => handleUbahNamaKepalaKeluarga(e.target.value)} className="tm-input w-full border border-slate-200 pl-9 pr-3 py-2.5 rounded-xl bg-slate-50" />
+                    </div>
+                  </div>
                   <div>
                     <label className="block mb-1 text-slate-600">Status Rumah</label>
                     <div className="grid grid-cols-2 gap-2">
@@ -5375,7 +6056,7 @@ export default function IuranWargaRTApp() {
                   </div>
 
                   <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-[11px] text-emerald-800 font-bold text-center">Iuran ini mencakup kebersihan, keamanan, Kas RT</div>
-                  <button type="submit" disabled={isDaftarLoading} className="w-full bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 text-white font-bold p-2.5 rounded-xl disabled:opacity-60 disabled:cursor-not-allowed">{isDaftarLoading ? 'Memeriksa & mendaftarkan...' : 'Daftar Sebagai Warga'}</button>
+                  <button type="submit" disabled={isDaftarLoading} className="tm-btn-utama w-full text-white font-black py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"><Ikon nama="userPlus" className="w-4 h-4" />{isDaftarLoading ? 'Memeriksa & mendaftarkan...' : 'Daftar Sekarang'}<Ikon nama="arrowRight" className="w-4 h-4" strokeWidth={2.6} /></button>
                 </form>
                 </div>
               </div>
@@ -5391,33 +6072,37 @@ export default function IuranWargaRTApp() {
                   <p className="text-[9px] text-emerald-300 font-black text-center mt-1.5 flex items-center justify-center gap-1">✅ Data real yang sudah diverifikasi oleh Pengurus RT</p>
                 </div>
                 <div className="p-6 pt-4">
-                <div className="overflow-x-auto -mx-2">
-                  <table className="w-full text-[10px] sm:text-[11px]">
-                    <thead>
-                      <tr className="text-slate-400 border-b text-left">
-                        <th className="py-1.5 px-2 font-bold">Tanggal</th>
-                        <th className="py-1.5 px-2 font-bold">Keterangan</th>
-                        <th className="py-1.5 px-2 font-bold text-right"><span className="text-emerald-600">▲</span> Masuk</th>
-                        <th className="py-1.5 px-2 font-bold text-right"><span className="text-rose-500">▼</span> Keluar</th>
-                        <th className="py-1.5 px-2 font-bold text-right">Saldo</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {getRiwayatKasRtDenganSaldo().map(t => (
-                        <tr key={t.id} className="border-b border-slate-50">
-                          <td className="py-1.5 px-2 text-slate-500 whitespace-nowrap">{formatTanggalLaporan(t.tanggal)}</td>
-                          <td className="py-1.5 px-2 text-slate-700 font-semibold">{t.keterangan}</td>
-                          <td className="py-1.5 px-2 text-right font-bold text-emerald-700 whitespace-nowrap">{t.jenis === 'Masuk' ? <>▲ Rp{Number(t.nominal).toLocaleString('id-ID')}</> : '-'}</td>
-                          <td className="py-1.5 px-2 text-right font-bold text-rose-600 whitespace-nowrap">{t.jenis === 'Keluar' ? <>▼ Rp{Number(t.nominal).toLocaleString('id-ID')}</> : '-'}</td>
-                          <td className="py-1.5 px-2 text-right font-bold text-slate-900 whitespace-nowrap">Rp{t.saldoSetelah.toLocaleString('id-ID')}</td>
-                        </tr>
-                      ))}
-                      {riwayatKasRt.length === 0 && (
-                        <tr><td colSpan={5} className="py-3 text-center text-slate-400 italic">Belum ada transaksi kas RT yang dicatat.</td></tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                <PaginasiKas data={getRiwayatKasRtDenganSaldo()} ukuran={10} gaya="terang">
+                  {(baris) => (
+                    <div className="overflow-x-auto -mx-2">
+                      <table className="w-full text-[10px] sm:text-[11px]">
+                        <thead>
+                          <tr className="text-slate-400 border-b text-left">
+                            <th className="py-1.5 px-2 font-bold">Tanggal</th>
+                            <th className="py-1.5 px-2 font-bold">Keterangan</th>
+                            <th className="py-1.5 px-2 font-bold text-right"><span className="text-emerald-600">▲</span> Masuk</th>
+                            <th className="py-1.5 px-2 font-bold text-right"><span className="text-rose-500">▼</span> Keluar</th>
+                            <th className="py-1.5 px-2 font-bold text-right">Saldo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {baris.map(t => (
+                            <tr key={t.id} className="border-b border-slate-50">
+                              <td className="py-1.5 px-2 text-slate-500 whitespace-nowrap">{formatTanggalLaporan(t.tanggal)}</td>
+                              <td className="py-1.5 px-2 text-slate-700 font-semibold min-w-[9rem]">{t.keterangan}</td>
+                              <td className="py-1.5 px-2 text-right font-bold text-[#047857] whitespace-nowrap">{t.jenis === 'Masuk' ? <>▲ Rp{Number(t.nominal).toLocaleString('id-ID')}</> : '-'}</td>
+                              <td className="py-1.5 px-2 text-right font-bold text-rose-600 whitespace-nowrap">{t.jenis === 'Keluar' ? <>▼ Rp{Number(t.nominal).toLocaleString('id-ID')}</> : '-'}</td>
+                              <td className="py-1.5 px-2 text-right font-bold text-slate-900 whitespace-nowrap">Rp{t.saldoSetelah.toLocaleString('id-ID')}</td>
+                            </tr>
+                          ))}
+                          {baris.length === 0 && (
+                            <tr><td colSpan={5} className="py-3 text-center text-slate-400 italic">Belum ada transaksi kas RT yang dicatat.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </PaginasiKas>
                 <div className="mt-3 bg-gradient-to-br from-blue-950 via-blue-900 to-blue-950 rounded-xl py-2.5 px-4 flex items-center justify-between">
                   <span className="text-slate-300 text-[10px] font-bold uppercase tracking-wide">Sisa Saldo Kas RT</span>
                   <span className="text-amber-400 font-black text-sm">Rp{(getRiwayatKasRtDenganSaldo().slice(-1)[0]?.saldoSetelah ?? 0).toLocaleString('id-ID')}</span>
@@ -5538,15 +6223,15 @@ export default function IuranWargaRTApp() {
           )}
 
           {/* SIDEBAR NAVIGATION (STICKY DI DESKTOP, DRAWER DI HP) */}
-          <div className={`w-72 sm:w-64 bg-gradient-to-b from-blue-950 via-blue-900 to-blue-950 text-blue-50 p-5 flex flex-col justify-between border-r border-blue-900/60 select-none shrink-0 h-screen overflow-y-auto fixed lg:sticky top-0 left-0 z-50 lg:z-auto transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
-            <div>
-              <div className="flex items-center justify-between gap-2 mb-4">
-                <div className="flex items-center gap-2 min-w-0">
+          <div className={`w-72 sm:w-60 bg-gradient-to-b from-blue-950 via-blue-900 to-blue-950 text-blue-50 p-5 flex flex-col justify-between border-r border-blue-900/60 select-none shrink-0 h-screen overflow-y-auto fixed lg:sticky top-0 left-0 z-50 lg:z-auto transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
+            <div className="relative z-10">
+              <div className="flex items-start justify-between gap-2 mb-5">
+                <div className="flex items-center gap-3 min-w-0">
                   <div className="relative shrink-0 group">
                     {cmsTeks.logoRT ? (
-                      <img loading="lazy" decoding="async" src={cmsTeks.logoRT} alt="Logo" className="w-9 h-9 rounded-lg object-contain bg-white border border-blue-800/60 shrink-0" onError={(e) => { e.target.style.display = 'none'; }} />
+                      <img loading="lazy" decoding="async" src={cmsTeks.logoRT} alt="Logo" className="w-11 h-11 rounded-xl object-contain bg-white p-0.5 border border-white/30 shadow-lg shrink-0" onError={(e) => { e.target.style.display = 'none'; }} />
                     ) : (
-                      <div className="bg-emerald-800 text-amber-400 px-2.5 py-1.5 rounded-lg font-black text-[10px] shrink-0">RT</div>
+                      <div className="w-11 h-11 rounded-xl bg-white/95 grid place-items-center text-emerald-700 font-black text-[11px] shadow-lg shrink-0">RT</div>
                     )}
                     {role === 'admin' && (
                       <label title="Ganti logo RT" className="absolute -bottom-1 -right-1 w-4 h-4 bg-amber-400 text-slate-950 rounded-full flex items-center justify-center text-[8px] font-black cursor-pointer border border-slate-900 opacity-90 hover:opacity-100">
@@ -5556,18 +6241,29 @@ export default function IuranWargaRTApp() {
                     )}
                   </div>
                   <div className="min-w-0">
-                    <p className="font-extrabold text-[11px] leading-tight text-blue-50 truncate">{cmsTeks.namaRT}</p>
-                    <p className="text-[8px] text-blue-300 font-semibold truncate">📍 {cmsTeks.alamatRT}</p>
+                    {(() => {
+                      const pecah = (cmsTeks.namaRT || '').match(/^(RT\s*\d+\s*RW\s*\d+)\s*(.*)$/i);
+                      return (
+                        <>
+                          <p className="font-black text-[14px] leading-tight text-white">{pecah ? pecah[1] : cmsTeks.namaRT}</p>
+                          {pecah && pecah[2] && <p className="text-[9.5px] font-bold leading-tight text-blue-100 mt-0.5">{pecah[2]}</p>}
+                        </>
+                      );
+                    })()}
+                    <p className="text-[7.5px] text-blue-300 font-medium leading-snug mt-1">{cmsTeks.alamatRT}</p>
                   </div>
                 </div>
                 <button onClick={() => setSidebarOpen(false)} aria-label="Tutup menu" className="lg:hidden w-7 h-7 rounded-full bg-blue-800/70 text-blue-100 shrink-0 font-black text-xs">✕</button>
               </div>
-              <div className="bg-blue-950/70 p-3 rounded-xl border border-blue-900/60 text-xs mb-4">
-                <span className="text-blue-300 font-bold block text-[9px] uppercase">User Aktif:</span>
-                <p className="font-black text-amber-400 text-sm truncate">{role === 'admin' ? 'BENDAHARA' : activeUserSession.nama}</p>
-                <span className="bg-emerald-900 text-white font-mono text-[9px] px-2 py-0.5 rounded mt-1 inline-block uppercase">
-                  {role === 'admin' ? 'ALL GROUPS' : activeUserSession.kelompok}
-                </span>
+              <div className="rounded-2xl p-2.5 mb-4 border border-white/15 bg-white/10 flex items-center gap-2.5">
+                <span className="w-9 h-9 rounded-full bg-white/90 grid place-items-center text-blue-800 shrink-0"><Ikon nama="user" className="w-5 h-5" /></span>
+                <div className="min-w-0">
+                  <span className="block text-[9px] font-bold uppercase text-blue-200 tracking-wide">User Aktif:</span>
+                  <p className="font-black text-white text-[14px] leading-tight truncate">{role === 'admin' ? 'BENDAHARA' : activeUserSession.nama}</p>
+                  <span className="inline-block mt-1 rounded-md px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-white bg-emerald-800">
+                    {role === 'admin' ? 'ALL GROUPS' : activeUserSession.kelompok}
+                  </span>
+                </div>
               </div>
 
               {/* AUTO-SCROLL KE ATAS: setiap kali warga/admin klik salah satu menu di
@@ -5577,16 +6273,16 @@ export default function IuranWargaRTApp() {
                   Dipasang di <nav> (bukan di tiap tombol satu-satu) supaya otomatis
                   berlaku untuk SEMUA tombol menu di dalamnya lewat event bubbling. */}
               <nav onClick={() => { setSidebarOpen(false); window.scrollTo && window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="space-y-1 text-xs font-bold">
-                <button onClick={() => setActiveMenu('dashboard')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'dashboard' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Dashboard Utama</button>
-                <button onClick={() => setActiveMenu('laporan-sapi')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'laporan-sapi' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Rekap Blok Rumah</button>
-                <button onClick={() => setActiveMenu('informasi-warga')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'informasi-warga' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Informasi Warga</button>
+                <button onClick={() => setActiveMenu('dashboard')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'dashboard' ? 'menu-aktif bg-emerald-600 text-white' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}><Ikon nama="home" className="w-[18px] h-[18px] shrink-0" /><span>Dashboard Utama</span></button>
+                <button onClick={() => setActiveMenu('laporan-sapi')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'laporan-sapi' ? 'menu-aktif bg-emerald-600 text-white' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}><Ikon nama="building" className="w-[18px] h-[18px] shrink-0" /><span>Rekap Blok Rumah</span></button>
+                <button onClick={() => setActiveMenu('informasi-warga')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'informasi-warga' ? 'menu-aktif bg-emerald-600 text-white' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}><Ikon nama="users" className="w-[18px] h-[18px] shrink-0" /><span>Informasi Warga</span></button>
 
                 {role === 'user' && (
                   <>
-                    <button onClick={() => setActiveMenu('anggota-keluarga')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'anggota-keluarga' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Anggota Keluarga</button>
-                    <button onClick={() => setActiveMenu('informasi-umum')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'informasi-umum' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Informasi Umum</button>
-                    <button onClick={() => setActiveMenu('laporan-belanja')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'laporan-belanja' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Laporan Belanja Kas RT</button>
-                    <button onClick={() => { setActiveMenu('ubah-password'); setPasswordMsg({ tipe: '', teks: '' }); }} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'ubah-password' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Ubah Password</button>
+                    <button onClick={() => setActiveMenu('anggota-keluarga')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'anggota-keluarga' ? 'menu-aktif bg-emerald-600 text-white' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}><Ikon nama="user" className="w-[18px] h-[18px] shrink-0" /><span>Anggota Keluarga</span></button>
+                    <button onClick={() => setActiveMenu('informasi-umum')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'informasi-umum' ? 'menu-aktif bg-emerald-600 text-white' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}><Ikon nama="file" className="w-[18px] h-[18px] shrink-0" /><span>Informasi Umum</span></button>
+                    <button onClick={() => setActiveMenu('laporan-belanja')} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'laporan-belanja' ? 'menu-aktif bg-emerald-600 text-white' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}><Ikon nama="receipt" className="w-[18px] h-[18px] shrink-0" /><span>Laporan Belanja Kas RT</span></button>
+                    <button onClick={() => { setActiveMenu('ubah-password'); setPasswordMsg({ tipe: '', teks: '' }); }} className={`menu-btn w-full text-left px-4 py-3 rounded-xl ${activeMenu === 'ubah-password' ? 'menu-aktif bg-emerald-600 text-white' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}><Ikon nama="lock" className="w-[18px] h-[18px] shrink-0" /><span>Ubah Password</span></button>
                     {!isSimulatedSession && (
                       <button
                         onClick={() => { if (window.confirm('Yakin ingin keluar dari akun Anda?')) handleUserLogout(); }}
@@ -5603,36 +6299,52 @@ export default function IuranWargaRTApp() {
                   <div className="pt-4 mt-4 border-t border-blue-900/50 space-y-1">
                     <span className="text-[9px] text-blue-300 uppercase px-4 block mb-1">Bendahara Control</span>
                     <button onClick={() => setActiveMenu('pending-pembayaran')} className={`menu-btn w-full text-left px-4 py-2 rounded-xl flex items-center justify-between ${activeMenu === 'pending-pembayaran' ? 'bg-amber-500 text-slate-950 shadow-lg' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>
-                      <span>Pending Iuran</span>
+                      <span className="flex items-center gap-3"><Ikon nama="clock" className="w-[18px] h-[18px] shrink-0" />Pending Iuran</span>
                       {(iuranMatrix.filter(r => r.status === 'MENUNGGU VERIFIKASI').length + tunggakanList.filter(t => t.status === 'MENUNGGU VERIFIKASI').length) > 0 && (
                         <span className="bg-rose-600 text-white text-[9px] font-black w-4.5 h-4.5 min-w-[18px] min-h-[18px] rounded-full flex items-center justify-center">{iuranMatrix.filter(r => r.status === 'MENUNGGU VERIFIKASI').length + tunggakanList.filter(t => t.status === 'MENUNGGU VERIFIKASI').length}</span>
                       )}
                     </button>
                     <button onClick={() => setActiveMenu('monitoring-tunggakan')} className={`menu-btn w-full text-left px-4 py-2 rounded-xl flex items-center justify-between ${activeMenu === 'monitoring-tunggakan' ? 'bg-rose-600 text-white shadow-lg' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>
-                      <span>Monitoring Tunggakan</span>
+                      <span className="flex items-center gap-3"><Ikon nama="alert" className="w-[18px] h-[18px] shrink-0" />Monitoring Tunggakan</span>
                       {jumlahWargaMenunggak > 0 && (
                         <span className="bg-rose-600 text-white text-[9px] font-black w-4.5 h-4.5 min-w-[18px] min-h-[18px] rounded-full flex items-center justify-center">{jumlahWargaMenunggak}</span>
                       )}
                     </button>
-                    <button onClick={() => setActiveMenu('realisasi-belanja')} className={`menu-btn w-full text-left px-4 py-2 rounded-xl ${activeMenu === 'realisasi-belanja' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Realisasi Belanja Kas RT</button>
+                    <button onClick={() => setActiveMenu('realisasi-belanja')} className={`menu-btn w-full text-left px-4 py-2 rounded-xl ${activeMenu === 'realisasi-belanja' ? 'menu-aktif bg-emerald-600 text-white' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}><Ikon nama="card" className="w-[18px] h-[18px] shrink-0" /><span>Realisasi Belanja Kas RT</span></button>
                     <button onClick={() => setActiveMenu('notif-pengajuan')} className={`menu-btn w-full text-left px-4 py-2 rounded-xl flex items-center justify-between ${activeMenu === 'notif-pengajuan' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>
-                      <span>Member Baru</span>
+                      <span className="flex items-center gap-3"><Ikon nama="userPlus" className="w-[18px] h-[18px] shrink-0" />Member Baru</span>
                       {pengajuanBaru.length > 0 && (
                         <span className="bg-rose-600 text-white text-[9px] font-black w-4.5 h-4.5 min-w-[18px] min-h-[18px] rounded-full flex items-center justify-center">{pengajuanBaru.length}</span>
                       )}
                     </button>
-                    <button onClick={() => setActiveMenu('kelola-kegiatan')} className={`menu-btn w-full text-left px-4 py-2 rounded-xl ${activeMenu === 'kelola-kegiatan' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Kelola Kegiatan / Agenda</button>
-                    <button onClick={() => setActiveMenu('manajemen-periode')} className={`menu-btn w-full text-left px-4 py-2 rounded-xl ${activeMenu === 'manajemen-periode' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>Manajemen Periode</button>
-                    <button onClick={() => setActiveMenu('cms-setting')} className={`menu-btn w-full text-left px-4 py-2 rounded-xl ${activeMenu === 'cms-setting' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}>CMS Super Editor</button>
+                    <button onClick={() => setActiveMenu('kelola-kegiatan')} className={`menu-btn w-full text-left px-4 py-2 rounded-xl ${activeMenu === 'kelola-kegiatan' ? 'menu-aktif bg-emerald-600 text-white' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}><Ikon nama="calendar" className="w-[18px] h-[18px] shrink-0" /><span>Kelola Kegiatan / Agenda</span></button>
+                    <button onClick={() => setActiveMenu('manajemen-periode')} className={`menu-btn w-full text-left px-4 py-2 rounded-xl ${activeMenu === 'manajemen-periode' ? 'menu-aktif bg-emerald-600 text-white' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}><Ikon nama="refresh" className="w-[18px] h-[18px] shrink-0" /><span>Manajemen Periode</span></button>
+                    <button onClick={() => setActiveMenu('cms-setting')} className={`menu-btn w-full text-left px-4 py-2 rounded-xl ${activeMenu === 'cms-setting' ? 'menu-aktif bg-emerald-600 text-white' : 'text-blue-200 hover:bg-blue-800/60 hover:translate-x-0.5'}`}><Ikon nama="cog" className="w-[18px] h-[18px] shrink-0" /><span>CMS Super Editor</span></button>
                   </div>
                 )}
               </nav>
             </div>
-            <button onClick={() => setView('landing')} className="w-full text-center bg-blue-800/60 text-blue-200 py-2 rounded-xl text-xs font-bold hover:text-white transition-colors duration-200">← Ke Beranda Depan</button>
+            <button onClick={() => setView('landing')} className="relative z-10 w-full text-center bg-blue-800/60 text-blue-200 py-2 rounded-xl text-xs font-bold hover:text-white transition-colors duration-200">← Ke Beranda Depan</button>
+            <AdeganPerumahan variant="sidebar" className="absolute bottom-0 left-0 w-full h-56 pointer-events-none z-0" />
           </div>
 
           {/* MAIN CONTAINER WORKSPACE (SCROLL NORMAL, TIDAK TERPOTONG) */}
           <div key={activeMenu} className="flex-1 w-full min-w-0 bg-slate-50 p-4 sm:p-6 lg:p-8 anim-fade pb-20 overflow-x-auto">
+
+            {/* BANNER ATAS DASHBOARD - latar ilustrasi perumahan (mengikuti tema), nomor
+                periode + status, dan slogan. */}
+            <div className="relative -mx-4 -mt-4 sm:-mx-6 sm:-mt-6 lg:-mx-8 lg:-mt-8 mb-4 h-[60px] sm:h-[66px] overflow-hidden text-white">
+              <AdeganPerumahan variant="header" className="absolute inset-0 w-full h-full" />
+              <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, color-mix(in srgb, var(--tm-d950) 40%, transparent), transparent 40%, transparent 52%, color-mix(in srgb, var(--tm-d950) 62%, transparent))' }}></div>
+              <div className="relative h-full flex items-center justify-end gap-3 sm:gap-6 px-4 sm:px-8">
+                <div className="flex items-center gap-2 rounded-full bg-white/15 backdrop-blur-sm px-2.5 py-1 border border-white/25 text-[10.5px] font-bold">
+                  <Ikon nama="calendar" className="w-3.5 h-3.5" />
+                  <span>No. {periodeAktif.noPeriode}</span>
+                  <span className="rounded-full px-2 py-0.5 text-[9px] font-black tracking-wider uppercase text-white bg-emerald-500">{periodeAktif.status}</span>
+                </div>
+                <p className="hidden lg:block font-tulisan text-[19px] leading-[1.05] italic text-right whitespace-nowrap text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.35)] -rotate-2">Bersama Warga<br />Untuk Lingkungan yang Lebih Baik</p>
+              </div>
+            </div>
 
             {/* BANNER MODE SIMULASI - tampil di ATAS SEMUA halaman/menu sidebar
                 selama akun masih memakai data contoh (isSimulatedSession),
@@ -5640,11 +6352,12 @@ export default function IuranWargaRTApp() {
                 dilihat BUKAN data asli. Begitu warga daftar & login memakai
                 akun sungguhan, banner ini otomatis hilang & seluruh halaman
                 langsung menampilkan data ASLI RT. Bahasa sengaja dibuat
-                sesederhana mungkin. */}
-            {isSimulatedSession && (
-              <div className="mb-4 bg-amber-50 border border-amber-300 text-amber-800 rounded-xl px-4 py-2.5 text-[11px] font-bold flex items-center gap-2">
-                <span className="text-base leading-none">🧪</span>
-                <span>Ini cuma contoh tampilan (simulasi), bukan data asli warga. Kalau sudah daftar &amp; login pakai akun sendiri, semua data di sini otomatis berganti jadi data asli.</span>
+                sesederhana mungkin. Bisa ditutup lewat tombol X. */}
+            {isSimulatedSession && !tutupBannerSimulasi && (
+              <div className="mb-3 rounded-xl border px-3.5 py-2 flex items-center gap-2.5 text-[11px] font-semibold shadow-sm" style={{ background: 'linear-gradient(90deg, var(--tm-a50), #ffffff)', borderColor: 'var(--tm-a200)', color: 'var(--tm-d900)' }}>
+                <span className="w-5 h-5 rounded-full grid place-items-center text-white shrink-0" style={{ background: 'var(--tm-d600)' }}><Ikon nama="info" className="w-3.5 h-3.5" /></span>
+                <span className="flex-1 leading-snug">Ini cuma contoh tampilan (simulasi), <b>bukan data asli warga</b>. Kalau sudah daftar &amp; login pakai akun sendiri, semua data di sini otomatis berganti jadi data asli.</span>
+                <button type="button" onClick={() => setTutupBannerSimulasi(true)} aria-label="Tutup" className="shrink-0 text-slate-400 hover:text-slate-700"><Ikon nama="x" className="w-4 h-4" /></button>
               </div>
             )}
 
@@ -6134,72 +6847,169 @@ export default function IuranWargaRTApp() {
 
                 {/* USER INTERFACE VIEW */}
                 {role === 'user' && (
-                  <div className="space-y-6 anim-fade">
+                  <div className="space-y-4 anim-fade">
                     {/* Catatan simulasi khusus halaman ini SUDAH DIHAPUS - sekarang
                         cukup pakai 1 banner simulasi global di paling atas halaman
                         (lihat isSimulatedSession di MAIN CONTAINER WORKSPACE) supaya
                         tidak dobel/tumpuk 2 kotak kuning. */}
-                    <div className="bg-white p-5 rounded-2xl border flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <h2 className="text-sm font-black text-slate-900">Assalamu'alaikum, {activeUserSession.nama} 👋</h2>
-                        <p className="text-[11px] text-slate-400 mt-0.5">Berikut ringkasan iuran Anda periode {periodeTahun}.</p>
+                    {/* KARTU SAPAAN - latar ilustrasi perumahan (mengikuti tema) + lonceng notifikasi */}
+                    <div className="relative rounded-3xl border border-white bg-white shadow-lg">
+                      <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none">
+                        <AdeganPerumahan variant="sapaan" className="absolute right-0 top-0 h-full w-full sm:w-[68%] opacity-30 sm:opacity-100" style={{ WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 42%)', maskImage: 'linear-gradient(90deg, transparent 0%, #000 42%)' }} />
                       </div>
-                      <NotifikasiBell />
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-bold">
-                      <div className="bg-white p-5 rounded-2xl border">
-                        <span className="text-slate-400 block uppercase text-[10px]">Target Total</span>
-                        <p className="text-lg font-black text-slate-900">Rp {activeUserSession.target.toLocaleString('id-ID')}</p>
-                      </div>
-                      <div className="bg-white p-5 rounded-2xl border">
-                        <span className="text-slate-400 block uppercase text-[10px]">Sudah Dibayar</span>
-                        <p className="text-lg font-black text-emerald-600">Rp {userDanaMasuk.toLocaleString('id-ID')}</p>
-                      </div>
-                      <div className="bg-white p-5 rounded-2xl border">
-                        <span className="text-slate-400 block uppercase text-[10px]">Sisa Tagihan</span>
-                        <p className="text-lg font-black text-rose-500">Rp {userSisaTagihan.toLocaleString('id-ID')}</p>
-                      </div>
-                      <div className="bg-white p-5 rounded-2xl border">
-                        <span className="text-slate-400 block uppercase text-[10px]">Persentase</span>
-                        <p className="text-lg font-black text-emerald-700">{persentaseCapaian}%</p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div className="sm:col-span-2 bg-white p-5 rounded-2xl border text-xs">
-                        <div className="flex justify-between font-bold mb-1">
-                          <span>Progress Pembayaran</span>
-                          <span className="text-emerald-700">{persentaseCapaian}%</span>
-                        </div>
-                        <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                          <div className="bg-emerald-600 h-full transition-all duration-700" style={{ width: `${persentaseCapaian}%` }}></div>
-                        </div>
-                        <p className="text-slate-400 font-medium mt-2">Anda telah menyelesaikan {userRows.filter(r => r.status === 'LUNAS').length} dari 12 angsuran.</p>
-                        <h4 className="font-black text-slate-900 uppercase text-[10px] mt-4 mb-1">Timeline Pembayaran {labelRentangPeriode}</h4>
-                        <BarTimeline data={userTimeline} />
-                      </div>
-                      <div className="space-y-4">
-                        <div className="bg-white p-5 rounded-2xl border text-xs">
-                          <h4 className="font-black text-slate-900 text-[11px] mb-2">Informasi Saya</h4>
-                          <div className="space-y-1 text-slate-500 font-semibold">
-                            <p>Nama: <span className="text-slate-800">{activeUserSession.nama}</span></p>
-                            <p>Nomor Rumah/Blok: <span className="text-slate-800">{activeUserSession.nomorRumah || activeUserSession.nama}</span></p>
-                            <p>No. WhatsApp: <span className="text-slate-800">{activeUserSession.wa}</span></p>
-                            <p>Alamat: <span className="text-slate-800">{activeUserSession.alamat || '-'}</span></p>
-                            <p>Tanggal Bergabung: <span className="text-slate-800">{activeUserSession.bergabung}</span></p>
-                            <p>Status: <span className="text-emerald-700">{activeUserSession.statusAnggota}</span></p>
+                      <div className="relative flex items-center justify-between gap-3 p-4 sm:p-[18px]">
+                        <div className="flex items-center gap-3.5 min-w-0">
+                          <div className="relative shrink-0">
+                            <span className="absolute inset-0 rounded-full blur-lg opacity-60" style={{ background: 'var(--tm-d400)' }}></span>
+                            <div className="relative w-[52px] h-[52px] rounded-full grid place-items-center text-white shadow-xl ring-[3px] ring-white" style={{ background: 'linear-gradient(135deg, var(--tm-d500), var(--tm-d800))' }}>
+                              <Ikon nama="home" className="w-6 h-6" />
+                            </div>
+                          </div>
+                          <div className="min-w-0">
+                            <h2 className="text-base sm:text-[18px] font-black text-slate-900 leading-tight">Assalamu'alaikum, {activeUserSession.nama} 👋</h2>
+                            <p className="text-[11.5px] sm:text-[12.5px] font-semibold mt-0.5" style={{ color: 'var(--tm-d700)' }}>Berikut ringkasan iuran Anda periode {periodeTahun}.</p>
                           </div>
                         </div>
-                        <div className="bg-white p-5 rounded-2xl border text-xs">
-                          <h4 className="font-black text-slate-900 text-[11px] mb-2">Pengumuman &amp; Agenda Terbaru</h4>
-                          <p className="text-slate-500 font-medium leading-relaxed mb-2">{cmsTeks.pengumuman}</p>
-                          {kegiatanList.length > 0 && (
-                            <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-2.5">
-                              <p className="text-emerald-800 font-black text-[10px]">{kegiatanList[kegiatanList.length - 1].judul}</p>
-                              <p className="text-emerald-700 font-semibold text-[10px] mt-0.5">{formatAgendaLengkap(kegiatanList[kegiatanList.length - 1].tanggal, kegiatanList[kegiatanList.length - 1].jam)} — {kegiatanList[kegiatanList.length - 1].tempat}</p>
+                        <NotifikasiBell />
+                      </div>
+                    </div>
+
+                    {/* 4 KARTU RINGKASAN */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                      {[
+                        { judul: 'Target Total', nilai: `Rp ${activeUserSession.target.toLocaleString('id-ID')}`, ikon: 'target', sudut: 'trend', tile: 'linear-gradient(135deg, var(--tm-d500), var(--tm-d700))', gelombang: 'var(--tm-d200)', sudutWarna: 'var(--tm-d400)', latar: 'var(--tm-d50)', warnaNilai: 'var(--tm-d950)' },
+                        { judul: 'Sudah Dibayar', nilai: `Rp ${userDanaMasuk.toLocaleString('id-ID')}`, ikon: 'card', sudut: 'checkCircle', tile: 'linear-gradient(135deg, var(--tm-a500), var(--tm-a700))', gelombang: 'var(--tm-a200)', sudutWarna: 'var(--tm-a500)', latar: 'var(--tm-a50)', warnaNilai: 'var(--tm-a700)' },
+                        { judul: 'Sisa Tagihan', nilai: `Rp ${userSisaTagihan.toLocaleString('id-ID')}`, ikon: 'coin', sudut: 'chart', tile: 'linear-gradient(135deg, #fb7185, #e11d48)', gelombang: '#fecdd3', sudutWarna: '#fb7185', latar: '#fff1f2', warnaNilai: '#e11d48' },
+                        { judul: 'Persentase', nilai: `${persentaseCapaian}%`, ikon: 'percent', sudut: 'chart', tile: 'linear-gradient(135deg, #a78bfa, #7c3aed)', gelombang: '#ddd6fe', sudutWarna: '#a78bfa', latar: '#f5f3ff', warnaNilai: '#1e293b' },
+                      ].map((k) => (
+                        <div key={k.judul} className="relative overflow-hidden rounded-2xl border border-white shadow-md p-3.5 pb-9" style={{ background: `linear-gradient(180deg, #ffffff 35%, ${k.latar})` }}>
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                            <span className="w-10 h-10 sm:w-11 sm:h-11 shrink-0 rounded-2xl grid place-items-center text-white shadow-lg" style={{ background: k.tile }}><Ikon nama={k.ikon} className="w-6 h-6" /></span>
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-black uppercase tracking-wide text-slate-600">{k.judul}</p>
+                              <p className="text-[16px] sm:text-[19px] font-black leading-tight" style={{ color: k.warnaNilai }}>{k.nilai}</p>
                             </div>
-                          )}
+                          </div>
+                          <span className="absolute top-3 right-3" style={{ color: k.sudutWarna }}><Ikon nama={k.sudut} className="w-4 h-4" /></span>
+                          <svg viewBox="0 0 200 40" preserveAspectRatio="none" className="absolute bottom-0 left-0 w-full h-7 pointer-events-none" aria-hidden="true">
+                            <path d="M0 24 C36 4 78 42 128 22 S184 6 200 16 V40 H0 Z" style={{ fill: k.gelombang, opacity: 0.85 }} />
+                          </svg>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5">
+                      <div className="lg:col-span-2 space-y-4 min-w-0">
+                        {/* PROGRESS PEMBAYARAN + TIMELINE 12 BULAN */}
+                        <div className="rounded-3xl border border-white bg-white shadow-md p-4 sm:p-5">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span className="w-11 h-11 shrink-0 rounded-2xl grid place-items-center" style={{ background: 'var(--tm-d50)', color: 'var(--tm-d600)' }}><Ikon nama="calendar" className="w-5 h-5" /></span>
+                              <div className="min-w-0">
+                                <h3 className="text-[15px] font-black text-slate-900 leading-tight">Progress Pembayaran</h3>
+                                <p className="text-[12px] text-slate-500 font-medium mt-0.5">Anda telah menyelesaikan {userRows.filter(r => r.status === 'LUNAS').length} dari 12 angsuran.</p>
+                              </div>
+                            </div>
+                            <span className="text-xl font-black shrink-0 text-emerald-600">{persentaseCapaian}%</span>
+                          </div>
+                          <div className="mt-4 h-3 rounded-full overflow-hidden" style={{ background: 'var(--tm-d100)' }}>
+                            <div className="h-full rounded-full transition-all duration-700" style={{ width: `${persentaseCapaian}%`, background: 'linear-gradient(90deg, var(--tm-a600), var(--tm-a400))', boxShadow: '0 0 14px var(--tm-a400)' }}></div>
+                          </div>
+                          <h4 className="mt-5 mb-2.5 text-[11px] font-black uppercase tracking-wide text-slate-800">Timeline Pembayaran {labelRentangPeriode}</h4>
+                          <div className="grid grid-cols-6 md:grid-cols-12 gap-2">
+                            {DAFTAR_BULAN.map((bln) => {
+                              const baris = userRows.find(r => r.bulanNama === bln.nama);
+                              const st = baris ? baris.status : 'BELUM BAYAR';
+                              const lunas = st === 'LUNAS';
+                              const menunggu = st === 'MENUNGGU VERIFIKASI';
+                              const tahunBln = getTahunUntukBulan(bln.nama);
+                              return (
+                                <div key={bln.id} title={`${bln.nama} ${tahunBln}: ${st}`} className={`rounded-xl border pt-2 pb-2 px-1 text-center flex flex-col items-center gap-1.5 shadow-sm ${lunas ? 'border-emerald-200 bg-emerald-50' : menunggu ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'}`}>
+                                  <div className="leading-tight">
+                                    <p className={`text-[11px] font-black ${lunas ? 'text-emerald-700' : menunggu ? 'text-amber-700' : 'text-slate-700'}`}>{bln.nama.slice(0, 3)}</p>
+                                    <p className="text-[9px] font-semibold text-slate-400">{tahunBln}</p>
+                                  </div>
+                                  {lunas ? (
+                                    <span className="w-6 h-6 rounded-full grid place-items-center bg-emerald-600 text-white shadow"><Ikon nama="check" className="w-3.5 h-3.5" strokeWidth={3.2} /></span>
+                                  ) : menunggu ? (
+                                    <span className="w-6 h-6 rounded-full grid place-items-center bg-amber-400 text-white shadow"><Ikon nama="clock" className="w-3.5 h-3.5" strokeWidth={2.8} /></span>
+                                  ) : (
+                                    <span className="w-6 h-6 rounded-full grid place-items-center bg-slate-100"><span className="w-2.5 h-2.5 rounded-full bg-slate-300"></span></span>
+                                  )}
+                                  <span className={`h-1.5 w-[80%] rounded-full ${lunas ? 'bg-emerald-600' : menunggu ? 'bg-amber-400' : 'bg-slate-200'}`}></span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* VISI & MISI */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <KartuVisiMisi judul="VISI" teks={cmsTeks.visi} ikon="eye" ramp="d" panah onKlik={() => { setActiveMenu('informasi-umum'); window.scrollTo && window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
+                          <KartuVisiMisi judul="MISI" teks={cmsTeks.misi} ikon="users" ramp="a" panah onKlik={() => { setActiveMenu('informasi-umum'); window.scrollTo && window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
+                        </div>
+                      </div>
+
+                      <div className="space-y-4 min-w-0">
+                        {/* INFORMASI SAYA */}
+                        <div className="rounded-3xl border border-white bg-white shadow-md p-5">
+                          <div className="flex items-center justify-between gap-2 mb-3.5">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="w-9 h-9 shrink-0 rounded-full grid place-items-center" style={{ background: 'var(--tm-d50)', color: 'var(--tm-d600)' }}><Ikon nama="user" className="w-5 h-5" /></span>
+                              <h3 className="text-[15px] font-black text-slate-900">Informasi Saya</h3>
+                            </div>
+                            {/* Perubahan data warga wajib dikonfirmasi ke pengurus RT (lihat Ketentuan Program) -
+                                tombol Edit membuka WhatsApp Pengurus dengan pesan permintaan ubah data. */}
+                            <a
+                              href={`${buatLinkWhatsapp(cmsTeks.infoKontak)}?text=${encodeURIComponent(`Halo Pengurus RT, saya ${activeUserSession.nama} (${activeUserSession.nomorRumah || activeUserSession.kelompok || '-'}) ingin mengubah data saya di aplikasi Iuran Warga.`)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50 transition-colors"
+                            >
+                              <Ikon nama="pencil" className="w-3 h-3" /> Edit
+                            </a>
+                          </div>
+                          <div className="space-y-2.5 text-[12px]">
+                            {[
+                              { ikon: 'user', label: 'Nama', nilai: activeUserSession.nama },
+                              { ikon: 'home', label: 'Nomor Rumah/Blok', nilai: activeUserSession.nomorRumah || activeUserSession.nama },
+                              { ikon: 'phone', label: 'No. WhatsApp', nilai: activeUserSession.wa },
+                              { ikon: 'mapPin', label: 'Alamat', nilai: activeUserSession.alamat || '-' },
+                              { ikon: 'calendar', label: 'Tanggal Bergabung', nilai: activeUserSession.bergabung },
+                            ].map((b) => (
+                              <div key={b.label} className="flex items-start gap-2">
+                                <span className="w-[8.6rem] shrink-0 flex items-center gap-2 text-slate-500 font-semibold text-[11px]"><Ikon nama={b.ikon} className="w-4 h-4 shrink-0" />{b.label}</span>
+                                <span className="font-bold text-slate-800 min-w-0 break-words">{b.nilai}</span>
+                              </div>
+                            ))}
+                            <div className="flex items-center gap-2">
+                              <span className="w-[8.6rem] shrink-0 flex items-center gap-2 text-slate-500 font-semibold text-[11px]"><Ikon nama="checkCircle" className="w-4 h-4 shrink-0" />Status</span>
+                              <span className={`px-3 py-0.5 rounded-full text-[11px] font-black ${activeUserSession.statusAnggota === 'Aktif' ? 'bg-[#d1fae5] text-[#047857]' : 'bg-slate-200 text-slate-500'}`}>{activeUserSession.statusAnggota}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* PENGUMUMAN & AGENDA TERBARU */}
+                        <div className="rounded-3xl border border-white bg-white shadow-md p-5">
+                          <div className="flex items-center justify-between gap-2 mb-3">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="w-9 h-9 shrink-0 rounded-full grid place-items-center" style={{ background: 'var(--tm-d50)', color: 'var(--tm-d600)' }}><Ikon nama="megaphone" className="w-[18px] h-[18px]" /></span>
+                              <h3 className="text-[14px] font-black text-slate-900 leading-tight">Pengumuman &amp; Agenda Terbaru</h3>
+                            </div>
+                            <button type="button" onClick={() => { setActiveMenu('informasi-umum'); window.scrollTo && window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="shrink-0 text-[11px] font-bold text-blue-700 hover:underline">Lihat Semua</button>
+                          </div>
+                          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3.5 flex items-start gap-3">
+                            <span className="w-10 h-10 shrink-0 rounded-xl grid place-items-center bg-white text-emerald-600 shadow-sm"><Ikon nama="calendar" className="w-5 h-5" /></span>
+                            <div className="min-w-0 text-[12px] leading-relaxed text-slate-600 font-medium">
+                              <p>{cmsTeks.pengumuman}</p>
+                              {kegiatanList.length > 0 && (
+                                <p className="mt-2 pt-2 border-t border-emerald-100">
+                                  <span className="block font-black text-emerald-800 text-[11px]">{kegiatanList[kegiatanList.length - 1].judul}</span>
+                                  <span className="block text-emerald-700 font-semibold text-[10px] mt-0.5">{formatAgendaLengkap(kegiatanList[kegiatanList.length - 1].tanggal, kegiatanList[kegiatanList.length - 1].jam)} — {kegiatanList[kegiatanList.length - 1].tempat}</span>
+                                </p>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -7205,35 +8015,39 @@ export default function IuranWargaRTApp() {
                           <p className="text-[11px] text-blue-200 mt-0.5">Riwayat kas RT lengkap dengan saldo berjalan, urut dari transaksi paling lama.</p>
                         </div>
                       </div>
-                      <div className="max-h-96 overflow-y-auto pr-1">
-                        <table className="w-full text-[11px] font-semibold">
-                          <thead className="sticky top-0 bg-blue-950">
-                            <tr className="text-blue-300 uppercase text-[9px] text-left border-b border-blue-800">
-                              <th className="py-1.5 pr-2">Tanggal</th>
-                              <th className="py-1.5 pr-2">Keterangan</th>
-                              <th className="py-1.5 pr-2">Jenis</th>
-                              <th className="py-1.5 pr-2 text-right">Nominal</th>
-                              <th className="py-1.5 pl-2 text-right">Saldo</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {dataKasRt.map(t => (
-                              <tr key={t.id} className="border-b border-blue-900/60 last:border-0">
-                                <td className="py-1.5 pr-2 text-blue-200 whitespace-nowrap">{t.tanggal}</td>
-                                <td className="py-1.5 pr-2 text-white">{t.keterangan}</td>
-                                <td className="py-1.5 pr-2">
-                                  <span className={`font-black ${t.jenis === 'Masuk' ? 'text-emerald-400' : 'text-rose-400'}`}>{t.jenis === 'Masuk' ? '▲ Masuk' : '▼ Keluar'}</span>
-                                </td>
-                                <td className={`py-1.5 pr-2 text-right font-black whitespace-nowrap ${t.jenis === 'Masuk' ? 'text-emerald-400' : 'text-rose-400'}`}>{t.jenis === 'Masuk' ? '+' : '-'}Rp{t.nominal.toLocaleString('id-ID')}</td>
-                                <td className="py-1.5 pl-2 text-right text-amber-300 font-bold whitespace-nowrap">Rp{t.saldoSetelah.toLocaleString('id-ID')}</td>
-                              </tr>
-                            ))}
-                            {dataKasRt.length === 0 && (
-                              <tr><td colSpan={5} className="py-3 text-center text-blue-300 italic">Belum ada transaksi kas RT yang dicatat.</td></tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
+                      <PaginasiKas data={dataKasRt} ukuran={10} gaya="gelap">
+                        {(baris) => (
+                          <div className="overflow-x-auto pr-1">
+                            <table className="w-full text-[11px] font-semibold">
+                              <thead className="bg-blue-950">
+                                <tr className="text-blue-300 uppercase text-[9px] text-left border-b border-blue-800">
+                                  <th className="py-1.5 pr-2">Tanggal</th>
+                                  <th className="py-1.5 pr-2">Keterangan</th>
+                                  <th className="py-1.5 pr-2">Jenis</th>
+                                  <th className="py-1.5 pr-2 text-right">Nominal</th>
+                                  <th className="py-1.5 pl-2 text-right">Saldo</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {baris.map(t => (
+                                  <tr key={t.id} className="border-b border-blue-900/60 last:border-0">
+                                    <td className="py-1.5 pr-2 text-blue-200 whitespace-nowrap">{t.tanggal}</td>
+                                    <td className="py-1.5 pr-2 text-white min-w-[9rem]">{t.keterangan}</td>
+                                    <td className="py-1.5 pr-2">
+                                      <span className={`font-black ${t.jenis === 'Masuk' ? 'text-[#34d399]' : 'text-rose-400'}`}>{t.jenis === 'Masuk' ? '▲ Masuk' : '▼ Keluar'}</span>
+                                    </td>
+                                    <td className={`py-1.5 pr-2 text-right font-black whitespace-nowrap ${t.jenis === 'Masuk' ? 'text-[#34d399]' : 'text-rose-400'}`}>{t.jenis === 'Masuk' ? '+' : '-'}Rp{t.nominal.toLocaleString('id-ID')}</td>
+                                    <td className="py-1.5 pl-2 text-right text-amber-300 font-bold whitespace-nowrap">Rp{t.saldoSetelah.toLocaleString('id-ID')}</td>
+                                  </tr>
+                                ))}
+                                {baris.length === 0 && (
+                                  <tr><td colSpan={5} className="py-3 text-center text-blue-300 italic">Belum ada transaksi kas RT yang dicatat.</td></tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </PaginasiKas>
                       <div className="mt-3 bg-blue-950/60 rounded-xl py-2.5 px-4 flex items-center justify-between border border-blue-800">
                         <span className="text-slate-300 text-[10px] font-bold uppercase tracking-wide">Sisa Saldo Kas RT</span>
                         <span className="text-amber-400 font-black text-sm">Rp{saldoKasRtSaatIni.toLocaleString('id-ID')}</span>
@@ -8250,20 +9064,24 @@ export default function IuranWargaRTApp() {
                     <p className="text-[11px] text-slate-400 mt-0.5">Catat setiap transaksi kas masuk (iuran, infaq, dll) & keluar (operasional, dll). Saldo berjalan otomatis dihitung urut tanggal, langsung tampil di Web Utama.</p>
                   </div>
 
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {getRiwayatKasRtDenganSaldo().map(t => (
-                      <div key={t.id} className="flex items-center gap-3 p-2.5 bg-slate-50 border rounded-xl">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-black text-slate-900 truncate">{t.keterangan}</p>
-                          <p className="text-[10px] text-slate-400">{formatTanggalLaporan(t.tanggal)} • Saldo setelah: Rp{t.saldoSetelah.toLocaleString('id-ID')}</p>
-                        </div>
-                        <span className={`font-bold text-[11px] shrink-0 ${t.jenis === 'Masuk' ? 'text-emerald-700' : 'text-rose-600'}`}>{t.jenis === 'Masuk' ? '+' : '-'}Rp{Number(t.nominal).toLocaleString('id-ID')}</span>
-                        <button type="button" onClick={() => handleEditRiwayatKasRt(t)} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded text-[10px] font-bold shrink-0">Edit</button>
-                        <button type="button" onClick={() => handleHapusRiwayatKasRt(t.id)} className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded text-[10px] font-bold shrink-0">Hapus</button>
+                  <PaginasiKas data={getRiwayatKasRtDenganSaldo()} ukuran={10} gaya="terang">
+                    {(baris) => (
+                      <div className="space-y-2">
+                        {baris.map(t => (
+                          <div key={t.id} className="flex items-center gap-3 p-2.5 bg-slate-50 border rounded-xl">
+                            <div className="flex-1 min-w-0">
+                              <p className="font-black text-slate-900 truncate">{t.keterangan}</p>
+                              <p className="text-[10px] text-slate-400">{formatTanggalLaporan(t.tanggal)} • Saldo setelah: Rp{t.saldoSetelah.toLocaleString('id-ID')}</p>
+                            </div>
+                            <span className={`font-bold text-[11px] shrink-0 ${t.jenis === 'Masuk' ? 'text-[#047857]' : 'text-rose-600'}`}>{t.jenis === 'Masuk' ? '+' : '-'}Rp{Number(t.nominal).toLocaleString('id-ID')}</span>
+                            <button type="button" onClick={() => handleEditRiwayatKasRt(t)} className="bg-slate-200 text-slate-700 px-2.5 py-1 rounded text-[10px] font-bold shrink-0">Edit</button>
+                            <button type="button" onClick={() => handleHapusRiwayatKasRt(t.id)} className="bg-rose-100 text-rose-700 px-2.5 py-1 rounded text-[10px] font-bold shrink-0">Hapus</button>
+                          </div>
+                        ))}
+                        {riwayatKasRt.length === 0 && <p className="text-slate-400 italic text-[11px]">Belum ada transaksi kas RT yang dicatat.</p>}
                       </div>
-                    ))}
-                    {riwayatKasRt.length === 0 && <p className="text-slate-400 italic text-[11px]">Belum ada transaksi kas RT yang dicatat.</p>}
-                  </div>
+                    )}
+                  </PaginasiKas>
 
                   <form onSubmit={handleTambahRiwayatKasRt} className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 space-y-2">
                     <p className="text-emerald-800 font-black text-[11px]">{editingRiwayatKasRtId ? 'Edit Transaksi Kas RT' : 'Catat Transaksi Kas RT Baru'}</p>
