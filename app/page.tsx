@@ -5358,20 +5358,24 @@ export default function IuranWargaRTApp() {
           ========================================================================= */}
       {view === 'landing' && (
         <div className="max-w-6xl mx-auto px-4 py-8 space-y-6 anim-fade">
-          <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white px-5 sm:px-8 py-4 rounded-2xl shadow-xs border">
-            <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="relative overflow-hidden flex flex-col sm:flex-row justify-between items-center gap-4 px-5 sm:px-8 py-4 rounded-2xl shadow-lg border border-white/40 text-white">
+            {/* LATAR FOTO + lapisan gelap (mengikuti tema) - sama dengan banner atas Dashboard */}
+            <AdeganPerumahan variant="header" className="absolute inset-0 w-full h-full pointer-events-none" />
+            <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(90deg, color-mix(in srgb, var(--tm-d950) 90%, transparent) 0%, color-mix(in srgb, var(--tm-d900) 72%, transparent) 34%, color-mix(in srgb, var(--tm-d900) 20%, transparent) 62%, color-mix(in srgb, var(--tm-d950) 45%, transparent) 100%)' }}></div>
+            <div className="absolute inset-0 sm:hidden pointer-events-none" style={{ background: 'color-mix(in srgb, var(--tm-d950) 55%, transparent)' }}></div>
+            <div className="relative flex items-center gap-3 w-full sm:w-auto">
               {cmsTeks.logoRT ? (
                 <img loading="lazy" decoding="async" src={cmsTeks.logoRT} alt={`Logo ${cmsTeks.namaRT}`} className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl object-contain border bg-white shrink-0" onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; e.target.insertAdjacentHTML('afterend', '<div class="bg-emerald-800 text-amber-400 px-3 py-1.5 rounded-xl font-black text-xs shrink-0 flex items-center justify-center w-11 h-11 sm:w-12 sm:h-12">RT</div>'); }} />
               ) : (
                 <div className="bg-emerald-800 text-amber-400 px-3 py-1.5 rounded-xl font-black text-xs shrink-0">RT</div>
               )}
               <div className="min-w-0">
-                <h1 className="font-extrabold text-slate-900 text-sm truncate">{cmsTeks.namaRT}</h1>
-                <p className="text-[9px] text-slate-400 font-semibold truncate">📍 {cmsTeks.alamatRT}</p>
-                <p className="text-[10px] text-emerald-700 font-bold uppercase tracking-widest truncate">{cmsTeks.subJudulBeranda}</p>
+                <h1 className="font-extrabold text-white text-sm truncate drop-shadow-[0_1px_3px_rgba(0,0,0,0.5)]">{cmsTeks.namaRT}</h1>
+                <p className="text-[9px] text-blue-200 font-semibold truncate">📍 {cmsTeks.alamatRT}</p>
+                <p className="text-[10px] text-emerald-300 font-bold uppercase tracking-widest truncate">{cmsTeks.subJudulBeranda}</p>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-center sm:justify-end">
+            <div className="relative flex flex-wrap items-center gap-2 w-full sm:w-auto justify-center sm:justify-end">
               {/* KARTU TREN PENGUNJUNG WEB - angka total SAMA untuk semua orang &
                   terus naik tiap kali ada yang membuka Web Utama (lihat useEffect
                   totalPengunjung), dilengkapi animasi hitung naik & grafik mini tren
@@ -5379,7 +5383,7 @@ export default function IuranWargaRTApp() {
                   ±12 detik setelah halaman dibuka (lihat state tampilkanKartuPengunjung). */}
               {tampilkanKartuPengunjung && (
                 <div className={`transition-opacity duration-700 ease-out ${pudarkanKartuPengunjung ? 'opacity-0' : 'opacity-100'}`}>
-                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide mb-1 text-center sm:text-left">Jumlah Pengunjung</p>
+                  <p className="text-[9px] text-white/85 font-bold uppercase tracking-wide mb-1 text-center sm:text-left">Jumlah Pengunjung</p>
                   <div className="flex items-center gap-3 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-slate-700/60 rounded-2xl px-3.5 py-2 shadow-md text-blue-300">
                     <SparklineTren data={trenPengunjung.spark} className="w-12 h-8 shrink-0" />
                     <div className="flex items-center gap-2.5 flex-wrap">
